@@ -25,6 +25,7 @@ local PickupService = require(services.PickupService)
 local FuelService = require(services.FuelService)
 local CombatService = require(services.CombatService)
 local AIService = require(services.AIService)
+local VehicleBuilder = require(services.VehicleBuilder)
 
 RemoteService.Start()
 local remotes = ReplicatedStorage:FindFirstChild("HoonangaRemotes")
@@ -67,6 +68,55 @@ expect(vehicles ~= nil, "Vehicles folder is missing")
 local enemy = vehicles:FindFirstChild("EnemyUte_01")
 expect(enemy ~= nil, "AIService did not create the enemy ute")
 expect(enemy.PrimaryPart ~= nil, "enemy ute has no primary part")
+expect(
+	enemy:GetAttribute("VisualAssetId") == 6418225759,
+	"enemy ute did not mount the audited pickup body"
+)
+expect(
+	enemy:GetAttribute("VisualVariant") == "Pickup Truck (blue)",
+	"enemy ute did not select the blue pickup variant"
+)
+local creatorStoreBody = enemy:FindFirstChild("CreatorStoreBody")
+expect(
+	creatorStoreBody ~= nil and creatorStoreBody:IsA("Model"),
+	"enemy ute has no Creator Store body model"
+)
+local visualPartCount = 0
+for _, descendant in creatorStoreBody:GetDescendants() do
+	expect(
+		not descendant:IsA("LuaSourceContainer"),
+		"Creator Store body retained executable source"
+	)
+	expect(
+		not descendant:IsA("VehicleSeat"),
+		"Creator Store body retained its original chassis seat"
+	)
+	if descendant:IsA("BasePart") then
+		visualPartCount += 1
+		expect(not descendant.Anchored, "Creator Store visual part is anchored")
+		expect(not descendant.CanCollide, "Creator Store visual part retained collision")
+	end
+end
+expect(visualPartCount >= 30, "Creator Store pickup body is incomplete")
+
+local playerVisualTest = VehicleBuilder.CreateUte(
+	vehicles,
+	"SmokePlayerVisual",
+	CFrame.new(0, 4, 300),
+	Color3.fromRGB(184, 73, 42)
+)
+expect(
+	playerVisualTest:GetAttribute("VisualVariant") == "Pickup Truck (bronze)",
+	"player ute did not select the bronze pickup variant"
+)
+local playerBody = playerVisualTest:FindFirstChild("CreatorStoreBody")
+expect(playerBody ~= nil and playerBody:IsA("Model"), "player ute has no Creator Store body model")
+for _, descendant in playerBody:GetDescendants() do
+	expect(not descendant:IsA("LuaSourceContainer"), "player body retained executable source")
+	expect(not descendant:IsA("VehicleSeat"), "player body retained its original chassis seat")
+end
+playerVisualTest:Destroy()
+
 expect(
 	enemy.PrimaryPart:FindFirstChild("TurretMuzzleAttachment") ~= nil,
 	"enemy ute has no turret muzzle"
