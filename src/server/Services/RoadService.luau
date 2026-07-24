@@ -113,6 +113,19 @@ local function configureChunk(chunk: Model, index: number)
 		)
 		oil.Transparency = 0.12
 		oil:SetAttribute("HazardType", "Oil")
+	elseif variant == 3 then
+		local fuelPickup = Instance.new("Part")
+		fuelPickup.Name = "FuelPickup"
+		fuelPickup.Anchored = true
+		fuelPickup.CanCollide = false
+		fuelPickup.Size = Vector3.new(3.2, 4, 3.2)
+		fuelPickup.CFrame = center * CFrame.new(-13, 2.25, -30) * CFrame.Angles(0, 0, math.rad(90))
+		fuelPickup.Shape = Enum.PartType.Cylinder
+		fuelPickup.Color = Color3.fromRGB(191, 59, 41)
+		fuelPickup.Material = Enum.Material.Metal
+		fuelPickup:SetAttribute("FuelAmount", 90)
+		fuelPickup.Parent = chunk
+		CollectionService:AddTag(fuelPickup, "FuelPickup")
 	end
 
 	local socketStart = Instance.new("Part")

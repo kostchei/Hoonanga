@@ -62,6 +62,10 @@ function VehicleBuilder.CreateUte(
 	vehicle:SetAttribute("MaxHull", 100)
 	vehicle:SetAttribute("Fuel", 300)
 	vehicle:SetAttribute("MaxFuel", 300)
+	vehicle:SetAttribute("OutOfFuel", false)
+	vehicle:SetAttribute("Ammo", 80)
+	vehicle:SetAttribute("ReserveAmmo", 240)
+	vehicle:SetAttribute("Reloading", false)
 	vehicle:SetAttribute("Destroyed", false)
 
 	local chassis = makePart("Chassis", CHASSIS_SIZE, bodyColor, Enum.Material.Metal)
@@ -148,7 +152,7 @@ function VehicleBuilder.CreateUte(
 
 	local cameraAttachment = Instance.new("Attachment")
 	cameraAttachment.Name = "CameraAttachment"
-	cameraAttachment.Position = Vector3.new(0, 2.8, 1.15)
+	cameraAttachment.Position = Vector3.new(0, 3, -0.5)
 	cameraAttachment.Parent = chassis
 
 	local muzzleAttachment = Instance.new("Attachment")

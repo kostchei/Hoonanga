@@ -54,6 +54,16 @@ selene src
 rojo build default.project.json --output build/Hoonanga.rbxlx
 ```
 
+The Studio smoke test uses Roblox Studio's command-line interface after the place is built:
+
+```powershell
+RobloxStudioBeta.exe --task RunScript `
+  --localPlaceFile "build/Hoonanga.rbxlx" `
+  --runScriptFile "scripts/studio_smoke_test.luau" `
+  --outputFile "build/studio-smoke.log" `
+  --quitAfterExecution
+```
+
 See [the game design document](docs/GAME_DESIGN_DOCUMENT.md) for the agreed scope and milestone plan.
 
 ---

@@ -181,7 +181,8 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, _deltaTime: nu
 	local drive = Vector3.zero
 
 	if groundedWheels > 0 then
-		local throttle = math.clamp(input.Throttle, -1, 1)
+		local hasFuel = vehicle:GetAttribute("OutOfFuel") ~= true
+		local throttle = if hasFuel then math.clamp(input.Throttle, -1, 1) else 0
 		local effectiveMaxSpeed = config.MaxForwardSpeed
 			/ math.max(1, (fuelMultiplier - 1) * 1.4 + 1)
 

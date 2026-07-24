@@ -10,7 +10,7 @@ return {
 		RecycleDistance = 700,
 	},
 	Spawn = {
-		Player = CFrame.new(-10, 8, 120) * CFrame.Angles(0, math.pi, 0),
-		Enemy = CFrame.new(12, 8, 35) * CFrame.Angles(0, math.pi, 0),
+		Player = CFrame.new(-10, 8, 120),
+		Enemy = CFrame.new(12, 8, 35),
 	},
 }
