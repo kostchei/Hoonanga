@@ -14,16 +14,10 @@ local MAX_YAW = math.rad(175)
 local MIN_PITCH = math.rad(-32)
 local MAX_PITCH = math.rad(24)
 local MOUSE_SENSITIVITY = 0.0024
-local CAMERA_SMOOTHING = 16
-local POSITION_CORRECTION = 5
-local ROTATION_CORRECTION = 10
-local SNAP_DISTANCE = 40
 
 local activeAttachment: Attachment? = nil
 local yaw = 0
 local pitch = 0
-local currentCFrame: CFrame? = nil
-local predictedChassisCFrame: CFrame? = nil
 local hiddenParts: { BasePart } = {}
 
 local function restoreHiddenParts()
@@ -80,14 +74,8 @@ local function refreshCameraMode()
 	activeAttachment = findCameraAttachment()
 	yaw = 0
 	pitch = 0
-	currentCFrame = nil
-	predictedChassisCFrame = nil
 
 	if activeAttachment then
-		local chassis = activeAttachment.Parent
-		if chassis and chassis:IsA("BasePart") then
-			predictedChassisCFrame = chassis.CFrame
-		end
 		hideFirstPersonObstructions(activeAttachment)
 		camera.CameraType = Enum.CameraType.Scriptable
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
@@ -117,7 +105,7 @@ function CameraController.Start()
 	RunService:BindToRenderStep(
 		"HoonangaVehicleCamera",
 		Enum.RenderPriority.Camera.Value + 1,
-		function(deltaTime)
+		function()
 			local resolvedAttachment = findCameraAttachment()
 			if resolvedAttachment ~= activeAttachment then
 				refreshCameraMode()
@@ -133,31 +121,13 @@ function CameraController.Start()
 				return
 			end
 
-			local rawChassisCFrame = chassis.CFrame
-			local predicted = predictedChassisCFrame or rawChassisCFrame
-			if (rawChassisCFrame.Position - predicted.Position).Magnitude > SNAP_DISTANCE then
-				predicted = rawChassisCFrame
-			else
-				local vehicle = chassis:FindFirstAncestorOfClass("Model")
-				local forwardSpeed = if vehicle then vehicle:GetAttribute("ForwardSpeed") else 0
-				local speed = if typeof(forwardSpeed) == "number" then forwardSpeed else 0
-				predicted += predicted.LookVector * speed * deltaTime
-
-				local positionAlpha = 1 - math.exp(-POSITION_CORRECTION * deltaTime)
-				local rotationAlpha = 1 - math.exp(-ROTATION_CORRECTION * deltaTime)
-				local position = predicted.Position:Lerp(rawChassisCFrame.Position, positionAlpha)
-				local rotation = predicted.Rotation:Lerp(rawChassisCFrame.Rotation, rotationAlpha)
-				predicted = CFrame.new(position) * rotation
-			end
-			predictedChassisCFrame = predicted
-
-			local target = predicted
+			-- Use the exact replicated chassis frame for both the cab and camera.
+			-- Smoothing or predicting this transform makes the viewpoint drift
+			-- relative to the visible vehicle whenever it accelerates.
+			camera.CFrame = chassis.CFrame
 				* attachment.CFrame
 				* CFrame.Angles(0, yaw, 0)
 				* CFrame.Angles(pitch, 0, 0)
-			local alpha = 1 - math.exp(-CAMERA_SMOOTHING * deltaTime)
-			currentCFrame = if currentCFrame then currentCFrame:Lerp(target, alpha) else target
-			camera.CFrame = currentCFrame
 		end
 	)
 end
