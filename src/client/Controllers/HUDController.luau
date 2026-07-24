@@ -3,6 +3,8 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
+local VehicleLocator = require(script.Parent.VehicleLocator)
+
 local localPlayer = Players.LocalPlayer
 
 local function makeLabel(
@@ -30,17 +32,7 @@ local function makeLabel(
 end
 
 local function currentVehicle(): Model?
-	local character = localPlayer.Character
-	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-	local seat = if humanoid then humanoid.SeatPart else nil
-	if not seat or not seat:IsA("VehicleSeat") then
-		return nil
-	end
-	local vehicle = seat:FindFirstAncestorOfClass("Model")
-	if vehicle and vehicle:GetAttribute("VehicleType") then
-		return vehicle
-	end
-	return nil
+	return VehicleLocator.ForPlayer(localPlayer)
 end
 
 local HUDController = {}
@@ -64,8 +56,8 @@ function HUDController.Start()
 	local status = makeLabel(
 		gui,
 		"Status",
-		UDim2.new(0, 22, 1, -142),
-		UDim2.fromOffset(300, 112),
+		UDim2.new(0, 22, 1, -166),
+		UDim2.fromOffset(300, 136),
 		18,
 		Enum.TextXAlignment.Left
 	)
@@ -102,7 +94,10 @@ function HUDController.Start()
 			return
 		end
 
-		local speed = vehicle.PrimaryPart.AssemblyLinearVelocity.Magnitude
+		local forwardSpeed = vehicle:GetAttribute("ForwardSpeed")
+		local speed = if typeof(forwardSpeed) == "number"
+			then math.abs(forwardSpeed)
+			else vehicle.PrimaryPart.AssemblyLinearVelocity.Magnitude
 		local fuel = vehicle:GetAttribute("Fuel") or 0
 		local maxFuel = vehicle:GetAttribute("MaxFuel") or 1
 		local hull = vehicle:GetAttribute("Hull") or 0
@@ -113,12 +108,14 @@ function HUDController.Start()
 		local distance = math.max(0, -vehicle.PrimaryPart.Position.Z)
 		local magazine = vehicle:GetAttribute("Ammo") or 0
 		local reserve = vehicle:GetAttribute("ReserveAmmo") or 0
+		local kills = localPlayer:GetAttribute("Kills") or 0
 
 		status.Text = string.format(
-			" SPEED  %03d\n FUEL   %03d%%\n HULL   %03d%%\n %s  |  %.2f km",
+			" SPEED  %03d\n FUEL   %03d%%\n HULL   %03d%%\n KILLS  %02d\n %s  |  %.2f km",
 			math.floor(speed + 0.5),
 			math.floor((fuel / maxFuel) * 100 + 0.5),
 			math.floor((hull / maxHull) * 100 + 0.5),
+			kills,
 			string.upper(surface),
 			distance / 1000
 		)

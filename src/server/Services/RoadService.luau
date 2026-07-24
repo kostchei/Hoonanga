@@ -13,6 +13,7 @@ type ChunkRecord = {
 
 local ROAD_Y = 0
 local ROAD_COLORS = {
+	Asphalt = Color3.fromRGB(72, 70, 66),
 	WornDirt = Color3.fromRGB(125, 92, 58),
 	LooseStone = Color3.fromRGB(151, 119, 80),
 	Mud = Color3.fromRGB(78, 61, 43),
@@ -65,6 +66,8 @@ local function configureChunk(chunk: Model, index: number)
 	local road = WorldConfig.Road
 	local centerZ = -(index * road.ChunkLength)
 	local center = CFrame.new(0, ROAD_Y, centerZ)
+	local variant = index % 4
+	local isAsphalt = variant == 0
 	chunk.Name = string.format("Chunk_%04d", index)
 	chunk:SetAttribute("ChunkIndex", index)
 	chunk:SetAttribute("RoadFamily", "StonyDesert")
@@ -81,15 +84,14 @@ local function configureChunk(chunk: Model, index: number)
 
 	makeSurface(
 		chunk,
-		"WornTrack",
+		if isAsphalt then "AsphaltRoad" else "WornTrack",
 		Vector3.new(48, 0.25, road.ChunkLength),
 		center * CFrame.new(0, 0.08, 0),
-		"WornDirt",
-		ROAD_COLORS.WornDirt,
-		Enum.Material.Ground
+		if isAsphalt then "Asphalt" else "WornDirt",
+		if isAsphalt then ROAD_COLORS.Asphalt else ROAD_COLORS.WornDirt,
+		if isAsphalt then Enum.Material.Asphalt else Enum.Material.Ground
 	)
 
-	local variant = index % 4
 	if variant == 1 then
 		local mud = makeSurface(
 			chunk,
@@ -164,23 +166,25 @@ local function createChunk(index: number): ChunkRecord
 	}
 end
 
-local function furthestVehicleProgress(): number
-	local furthest = 0
+local function slowestPlayerProgress(): number
+	local slowest: number? = nil
 	for _, vehicle in CollectionService:GetTagged("HoonangaVehicle") do
 		if
 			vehicle:IsA("Model")
 			and vehicle.PrimaryPart
 			and not vehicle:GetAttribute("Destroyed")
+			and vehicle:GetAttribute("Team") == "Player"
 		then
-			furthest = math.max(furthest, -vehicle.PrimaryPart.Position.Z)
+			local progress = -vehicle.PrimaryPart.Position.Z
+			slowest = if slowest then math.min(slowest, progress) else progress
 		end
 	end
-	return furthest
+	return slowest or 0
 end
 
 local function recyclePassedChunks()
 	local road = WorldConfig.Road
-	local progress = furthestVehicleProgress()
+	local progress = slowestPlayerProgress()
 	table.sort(chunks, function(a, b)
 		return a.Index < b.Index
 	end)
@@ -224,6 +228,19 @@ function RoadService.Start()
 	local vehicles = Instance.new("Folder")
 	vehicles.Name = "Vehicles"
 	vehicles.Parent = world
+
+	local fallbackSpawn = Instance.new("SpawnLocation")
+	fallbackSpawn.Name = "FallbackSpawn"
+	fallbackSpawn.Anchored = true
+	fallbackSpawn.CanCollide = true
+	fallbackSpawn.Neutral = true
+	fallbackSpawn.Duration = 0
+	fallbackSpawn.Size = Vector3.new(10, 1, 10)
+	fallbackSpawn.Position = Vector3.new(-34, 0.75, 120)
+	fallbackSpawn.Color = Color3.fromRGB(176, 123, 63)
+	fallbackSpawn.Material = Enum.Material.Metal
+	fallbackSpawn.Transparency = 0.25
+	fallbackSpawn.Parent = world
 
 	local killPlane = Instance.new("Part")
 	killPlane.Name = "KillPlane"

@@ -31,7 +31,7 @@
     "Workspace": {
       "$className": "Workspace",
       "$properties": {
-        "StreamingEnabled": true,
+        "StreamingEnabled": false,
         "Gravity": 196.2
       }
     },
@@ -44,6 +44,7 @@
         "ClockTime": 16.5,
         "EnvironmentDiffuseScale": 0.35,
         "EnvironmentSpecularScale": 0.25,
+        "Technology": "Voxel",
         "OutdoorAmbient": [0.47, 0.36, 0.27]
       }
     }

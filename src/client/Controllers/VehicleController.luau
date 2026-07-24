@@ -5,7 +5,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
+local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("HoonangaRemotes")
@@ -20,7 +20,6 @@ local ACTION_PRIORITY = Enum.ContextActionPriority.High.Value + 100
 local INPUT_SEND_INTERVAL = 0.1
 
 local activeVehicle: Model? = nil
-local activeSeat: VehicleSeat? = nil
 local actionsBound = false
 local forwardPressed = false
 local reversePressed = false
@@ -28,17 +27,6 @@ local leftPressed = false
 local rightPressed = false
 local handbrakePressed = false
 local lastInputSentAt = 0
-
-local function findVehicleFromSeat(seat: BasePart?): Model?
-	if not seat or not seat:IsA("VehicleSeat") then
-		return nil
-	end
-	local model = seat:FindFirstAncestorOfClass("Model")
-	if model and model:GetAttribute("VehicleType") then
-		return model
-	end
-	return nil
-end
 
 local function inputValue(pressed: boolean): number
 	return if pressed then 1 else 0
@@ -147,21 +135,18 @@ local function unbindVehicleActions()
 end
 
 local function refreshVehicle()
-	local character = localPlayer.Character
-	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-	local seat = if humanoid then humanoid.SeatPart else nil
-	activeVehicle = findVehicleFromSeat(seat)
-	activeSeat = if seat and seat:IsA("VehicleSeat") then seat else nil
-
-	if activeVehicle then
-		if humanoid then
-			humanoid.AutoRotate = false
+	local previousVehicle = activeVehicle
+	activeVehicle = VehicleLocator.ForPlayer(localPlayer)
+	if activeVehicle ~= previousVehicle then
+		if activeVehicle then
+			print(string.format("[Hoonanga] Client acquired %s", activeVehicle.Name))
+		elseif previousVehicle then
+			warn(string.format("[Hoonanga] Client lost %s", previousVehicle.Name))
 		end
+	end
+	if activeVehicle then
 		bindVehicleActions()
 	else
-		if humanoid then
-			humanoid.AutoRotate = true
-		end
 		unbindVehicleActions()
 	end
 end
@@ -169,34 +154,20 @@ end
 local VehicleController = {}
 
 function VehicleController.Start()
-	localPlayer.CharacterAdded:Connect(function(character)
-		local humanoid = character:WaitForChild("Humanoid") :: Humanoid
-		humanoid:GetPropertyChangedSignal("SeatPart"):Connect(refreshVehicle)
-		refreshVehicle()
-	end)
-
-	if localPlayer.Character then
-		local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid:GetPropertyChangedSignal("SeatPart"):Connect(refreshVehicle)
-		end
-	end
 	refreshVehicle()
 
-	RunService.Heartbeat:Connect(function(deltaTime)
+	RunService.Heartbeat:Connect(function()
+		local resolvedVehicle = VehicleLocator.ForPlayer(localPlayer)
+		if resolvedVehicle ~= activeVehicle then
+			refreshVehicle()
+		end
+
 		local vehicle = activeVehicle
-		local seat = activeSeat
-		if not vehicle or not vehicle.Parent or not seat then
+		if not vehicle or not vehicle.Parent then
 			return
 		end
 
 		local throttle, steer, handbrake = currentInput()
-		VehiclePhysics.Step(vehicle, {
-			Throttle = throttle,
-			Steer = steer,
-			Handbrake = handbrake,
-		}, deltaTime)
-
 		local now = os.clock()
 		if now - lastInputSentAt >= INPUT_SEND_INTERVAL then
 			lastInputSentAt = now

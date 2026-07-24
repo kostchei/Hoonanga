@@ -45,19 +45,31 @@ expect(world ~= nil, "RoadService did not create HoonangaWorld")
 
 local roadChunks = world:FindFirstChild("RoadChunks")
 expect(roadChunks ~= nil, "RoadChunks folder is missing")
-expect(#roadChunks:GetChildren() == 7, "expected seven initial road chunks")
+expect(#roadChunks:GetChildren() == 21, "expected 21 initial road chunks")
+
+local foundSurfaces = {
+	Asphalt = false,
+	Mud = false,
+	Oil = false,
+}
+for _, descendant in roadChunks:GetDescendants() do
+	local profile = descendant:GetAttribute("SurfaceProfile")
+	if typeof(profile) == "string" and foundSurfaces[profile] ~= nil then
+		foundSurfaces[profile] = true
+	end
+end
+expect(foundSurfaces.Asphalt, "no playable asphalt surface was generated")
+expect(foundSurfaces.Mud, "no playable mud surface was generated")
+expect(foundSurfaces.Oil, "no playable oil surface was generated")
 
 local vehicles = world:FindFirstChild("Vehicles")
 expect(vehicles ~= nil, "Vehicles folder is missing")
 local enemy = vehicles:FindFirstChild("EnemyUte_01")
-expect(enemy ~= nil, "AIService did not create the enemy ute")
-expect(enemy.PrimaryPart ~= nil, "enemy ute has no primary part")
-expect(enemy:FindFirstChild("DriverSeat") ~= nil, "enemy ute has no driver seat")
-expect(enemy:GetAttribute("Ammo") == 80, "enemy weapon state was not initialized")
+expect(enemy == nil, "enemy ute should be disabled during initial driving tests")
 
 print(
 	string.format(
-		"[SMOKE] PASS: %d chunks, %d vehicle(s), shared modules loaded",
+		"[SMOKE] PASS: %d chunks, %d vehicle(s), asphalt/mud/oil generated",
 		#roadChunks:GetChildren(),
 		#vehicles:GetChildren()
 	)

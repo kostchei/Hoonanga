@@ -72,10 +72,25 @@ function VehicleBuilder.CreateUte(
 	vehicle:SetAttribute("Destroyed", false)
 
 	local chassis = makePart("Chassis", CHASSIS_SIZE, bodyColor, Enum.Material.Metal)
+	chassis.Anchored = true
 	chassis.CustomPhysicalProperties = PhysicalProperties.new(2.4, 0.5, 0.05, 1, 1)
 	chassis.CFrame = CFrame.new()
+	chassis.RootPriority = 127
 	chassis.Parent = vehicle
 	vehicle.PrimaryPart = chassis
+
+	local ballast = makePart(
+		"Ballast",
+		Vector3.new(5.6, 0.8, 8),
+		Color3.fromRGB(30, 30, 30),
+		Enum.Material.Metal
+	)
+	ballast.CanCollide = false
+	ballast.Transparency = 1
+	ballast.CustomPhysicalProperties = PhysicalProperties.new(6, 0, 0, 100, 100)
+	weldToChassis(chassis, ballast, CFrame.new(0, -1.25, 0))
+	ballast.Massless = false
+	ballast.Parent = vehicle
 
 	local body = makePart("Body", Vector3.new(6.2, 1.5, 7.2), bodyColor, Enum.Material.Metal)
 	body.CanCollide = false
@@ -113,6 +128,7 @@ function VehicleBuilder.CreateUte(
 	seat.Color = Color3.fromRGB(40, 40, 40)
 	seat.Material = Enum.Material.SmoothPlastic
 	seat.CanCollide = false
+	seat.Disabled = false
 	seat.MaxSpeed = 0
 	seat.Torque = 0
 	weldToChassis(chassis, seat, CFrame.new(0, 1.65, 1.7))
@@ -152,6 +168,17 @@ function VehicleBuilder.CreateUte(
 	steeringVelocity.MaxTorque = math.huge
 	steeringVelocity.AngularVelocity = Vector3.zero
 	steeringVelocity.Parent = chassis
+
+	local uprightOrientation = Instance.new("AlignOrientation")
+	uprightOrientation.Name = "UprightOrientation"
+	uprightOrientation.Attachment0 = centerAttachment
+	uprightOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	uprightOrientation.MaxAngularVelocity = math.rad(180)
+	uprightOrientation.MaxTorque = 2_000_000
+	uprightOrientation.Responsiveness = 18
+	uprightOrientation.RigidityEnabled = false
+	uprightOrientation.CFrame = spawnCFrame.Rotation
+	uprightOrientation.Parent = chassis
 
 	local cameraAttachment = Instance.new("Attachment")
 	cameraAttachment.Name = "CameraAttachment"

@@ -23,60 +23,39 @@ export type Telemetry = {
 }
 
 type PhysicsState = {
-	RaycastParams: RaycastParams,
-	SuspensionForces: { VectorForce },
-	DriveForce: VectorForce,
-	SteeringVelocity: AngularVelocity,
+	Speed: number,
+	VerticalSpeed: number,
 }
 
+local GROUND_CLEARANCE = 2.8
+local GROUND_PROBE_HEIGHT = 8
+local GROUND_PROBE_DEPTH = 20
+local FALL_ACCELERATION = 70
+
 local states: { [Model]: PhysicsState } = setmetatable({}, { __mode = "k" }) :: any
+
+local function approach(current: number, target: number, amount: number): number
+	if current < target then
+		return math.min(current + amount, target)
+	end
+	return math.max(current - amount, target)
+end
 
 local function getVehicleType(vehicle: Model): string
 	return vehicle:GetAttribute("VehicleType") or "Ute"
 end
 
-local function getState(vehicle: Model): PhysicsState?
-	local cached = states[vehicle]
-	if cached then
-		return cached
+local function getState(vehicle: Model): PhysicsState
+	local state = states[vehicle]
+	if state then
+		return state
 	end
 
-	local chassis = vehicle.PrimaryPart
-	if not chassis then
-		return nil
-	end
-
-	local suspensionForces = {}
-	for _, corner in { "FL", "FR", "RL", "RR" } do
-		local force = chassis:FindFirstChild("Suspension" .. corner)
-		if not force or not force:IsA("VectorForce") then
-			return nil
-		end
-		table.insert(suspensionForces, force)
-	end
-
-	local driveForce = chassis:FindFirstChild("DriveForce")
-	local steeringVelocity = chassis:FindFirstChild("SteeringVelocity")
-	if not driveForce or not driveForce:IsA("VectorForce") then
-		return nil
-	end
-	if not steeringVelocity or not steeringVelocity:IsA("AngularVelocity") then
-		return nil
-	end
-
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { vehicle }
-	raycastParams.IgnoreWater = false
-
-	local state: PhysicsState = {
-		RaycastParams = raycastParams,
-		SuspensionForces = suspensionForces,
-		DriveForce = driveForce,
-		SteeringVelocity = steeringVelocity,
+	state = {
+		Speed = 0,
+		VerticalSpeed = 0,
 	}
 	states[vehicle] = state
-
 	return state
 end
 
@@ -88,29 +67,35 @@ local function resolveSurface(part: Instance?): (string, any)
 			profileName = attribute
 		end
 	end
-
 	return profileName, SurfaceProfiles[profileName]
+end
+
+local function probeGround(vehicle: Model, position: Vector3): RaycastResult?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { vehicle }
+	params.IgnoreWater = false
+
+	local origin = position + Vector3.new(0, GROUND_PROBE_HEIGHT, 0)
+	return Workspace:Raycast(
+		origin,
+		Vector3.new(0, -(GROUND_PROBE_HEIGHT + GROUND_PROBE_DEPTH), 0),
+		params
+	)
 end
 
 local VehiclePhysics = {}
 
 function VehiclePhysics.Reset(vehicle: Model)
 	local state = getState(vehicle)
-	if not state then
-		return
-	end
-
-	for _, force in state.SuspensionForces do
-		force.Force = Vector3.zero
-	end
-	state.DriveForce.Force = Vector3.zero
-	state.SteeringVelocity.AngularVelocity = Vector3.zero
+	state.Speed = 0
+	state.VerticalSpeed = 0
+	vehicle:SetAttribute("ForwardSpeed", 0)
 end
 
-function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, _deltaTime: number): Telemetry?
+function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: number): Telemetry?
 	local chassis = vehicle.PrimaryPart
-	local state = getState(vehicle)
-	if not chassis or not state then
+	if not chassis then
 		return nil
 	end
 
@@ -119,113 +104,86 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, _deltaTime: nu
 		return nil
 	end
 
-	local up = chassis.CFrame.UpVector
-	local forward = chassis.CFrame.LookVector
-	local right = chassis.CFrame.RightVector
-	local velocity = chassis.AssemblyLinearVelocity
-	local mass = chassis.AssemblyMass
-	local groundedWheels = 0
-	local totalGrip = 0
-	local totalFuelMultiplier = 0
-	local surfaceVotes: { [string]: number } = {}
-
-	for _, force in state.SuspensionForces do
-		local attachment = force.Attachment0
-		if not attachment then
-			continue
-		end
-
-		local origin = attachment.WorldPosition
-		local result =
-			Workspace:Raycast(origin, -up * config.Suspension.RayLength, state.RaycastParams)
-		if not result then
-			force.Force = Vector3.zero
-			continue
-		end
-
-		groundedWheels += 1
-		local distance = (result.Position - origin).Magnitude
-		local compression = config.Suspension.RideHeight - distance
-		local pointVelocity = chassis:GetVelocityAtPosition(origin)
-		local verticalSpeed = pointVelocity:Dot(up)
-		local baseSupport = mass * Workspace.Gravity / #state.SuspensionForces
-		local spring = compression * mass * config.Suspension.SpringStrength
-		local damping = verticalSpeed
-			* mass
-			* config.Suspension.SpringDamping
-			/ #state.SuspensionForces
-		local forceMagnitude = math.max(0, baseSupport + spring - damping)
-		force.Force = up * forceMagnitude
-
-		local profileName, profile = resolveSurface(result.Instance)
-		totalGrip += profile.Grip
-		totalFuelMultiplier += profile.FuelUse
-		surfaceVotes[profileName] = (surfaceVotes[profileName] or 0) + 1
+	local state = getState(vehicle)
+	local frame = chassis.CFrame
+	local groundResult = probeGround(vehicle, frame.Position)
+	local surfaceName = "Air"
+	local profile = SurfaceProfiles.WornDirt
+	local grounded = groundResult ~= nil
+	if groundResult then
+		surfaceName, profile = resolveSurface(groundResult.Instance)
 	end
 
-	local grip = if groundedWheels > 0 then totalGrip / groundedWheels else 0
-	local fuelMultiplier = if groundedWheels > 0 then totalFuelMultiplier / groundedWheels else 1
-	local dominantSurface = "Air"
-	local dominantVotes = 0
-	for profileName, votes in surfaceVotes do
-		if votes > dominantVotes then
-			dominantSurface = profileName
-			dominantVotes = votes
+	local grip = if grounded then profile.Grip else 0
+	local fuelMultiplier = if grounded then profile.FuelUse else 1
+	local throttle = if vehicle:GetAttribute("OutOfFuel") == true
+		then 0
+		else math.clamp(input.Throttle, -1, 1)
+	local accelerationScale = math.clamp(grip, 0.28, 1.15) / math.max(fuelMultiplier, 0.8)
+
+	if throttle > 0 then
+		state.Speed += config.Acceleration * accelerationScale * throttle * deltaTime
+	elseif throttle < 0 then
+		if state.Speed > 1 then
+			state.Speed =
+				approach(state.Speed, 0, config.BrakeDeceleration * math.abs(throttle) * deltaTime)
+		else
+			state.Speed -= config.ReverseAcceleration * accelerationScale * math.abs(throttle) * deltaTime
 		end
+	else
+		local coast = config.CoastDeceleration * (if input.Handbrake then 3.2 else 1)
+		state.Speed = approach(state.Speed, 0, coast * fuelMultiplier * deltaTime)
 	end
 
-	local forwardSpeed = velocity:Dot(forward)
-	local sideSpeed = velocity:Dot(right)
-	local horizontalVelocity = velocity - up * velocity:Dot(up)
-	local speed = horizontalVelocity.Magnitude
-	local drive = Vector3.zero
+	local maxForwardSpeed = config.MaxForwardSpeed / math.max(1, (fuelMultiplier - 1) * 1.4 + 1)
+	state.Speed = math.clamp(state.Speed, -config.MaxReverseSpeed, maxForwardSpeed)
 
-	if groundedWheels > 0 then
-		local hasFuel = vehicle:GetAttribute("OutOfFuel") ~= true
-		local throttle = if hasFuel then math.clamp(input.Throttle, -1, 1) else 0
-		local effectiveMaxSpeed = config.MaxForwardSpeed
-			/ math.max(1, (fuelMultiplier - 1) * 1.4 + 1)
-
-		if throttle > 0 and forwardSpeed < effectiveMaxSpeed then
-			drive += forward * throttle * config.Acceleration * mass
-		elseif throttle < 0 then
-			if forwardSpeed > 3 then
-				drive -= forward * math.abs(throttle) * config.BrakeDeceleration * mass
-			elseif forwardSpeed > -config.MaxReverseSpeed then
-				drive += forward * throttle * config.ReverseAcceleration * mass
-			end
-		elseif math.abs(forwardSpeed) > 0.5 then
-			drive -= forward * math.sign(forwardSpeed) * config.CoastDeceleration * mass * fuelMultiplier
-		end
-
-		local handbrakeGrip = if input.Handbrake then 0.22 else 1
-		drive -= right * sideSpeed * mass * config.LateralGrip * grip * handbrakeGrip
-		drive -= up * math.min(speed * mass * config.Downforce, mass * Workspace.Gravity)
-
-		local speedRatio = math.clamp(math.abs(forwardSpeed) / config.MaxForwardSpeed, 0, 1)
+	local yawDelta = 0
+	if grounded and math.abs(state.Speed) > 0.5 then
+		local speedRatio = math.clamp(math.abs(state.Speed) / config.MaxForwardSpeed, 0, 1)
 		local steeringScale = 1 - speedRatio * (1 - config.HighSpeedSteeringFactor)
-		local movementScale = math.clamp(math.abs(forwardSpeed) / 7, 0, 1)
-		local reverseDirection = if forwardSpeed < -1 then -1 else 1
-		local yawRate = -math.clamp(input.Steer, -1, 1)
+		local movementScale = math.clamp(math.abs(state.Speed) / 7, 0, 1)
+		local reverseDirection = if state.Speed < 0 then -1 else 1
+		local handbrakeScale = if input.Handbrake then 1.3 else 1
+		yawDelta = -math.clamp(input.Steer, -1, 1)
 			* config.SteeringRate
 			* steeringScale
 			* movementScale
+			* math.clamp(grip, 0.22, 1)
+			* handbrakeScale
 			* reverseDirection
-		state.SteeringVelocity.AngularVelocity = Vector3.new(0, yawRate, 0)
-	else
-		state.SteeringVelocity.AngularVelocity = Vector3.zero
+			* deltaTime
 	end
 
-	state.DriveForce.Force = drive
-	vehicle:SetAttribute("SurfaceProfile", dominantSurface)
+	local yawedFrame = frame * CFrame.Angles(0, yawDelta, 0)
+	local position = frame.Position + yawedFrame.LookVector * state.Speed * deltaTime
+	if groundResult then
+		state.VerticalSpeed = 0
+		local targetY = groundResult.Position.Y + GROUND_CLEARANCE
+		local heightAlpha = 1 - math.exp(-14 * deltaTime)
+		position =
+			Vector3.new(position.X, position.Y + (targetY - position.Y) * heightAlpha, position.Z)
+	else
+		state.VerticalSpeed -= FALL_ACCELERATION * deltaTime
+		position += Vector3.new(0, state.VerticalSpeed * deltaTime, 0)
+		state.Speed *= math.exp(-0.35 * deltaTime)
+	end
+
+	local flatForward = Vector3.new(yawedFrame.LookVector.X, 0, yawedFrame.LookVector.Z)
+	if flatForward.Magnitude < 0.01 then
+		flatForward = Vector3.new(0, 0, -1)
+	end
+	vehicle:PivotTo(CFrame.lookAt(position, position + flatForward.Unit, Vector3.yAxis))
+
+	vehicle:SetAttribute("SurfaceProfile", surfaceName)
 	vehicle:SetAttribute("SurfaceFuelMultiplier", fuelMultiplier)
-	vehicle:SetAttribute("ForwardSpeed", forwardSpeed)
+	vehicle:SetAttribute("ForwardSpeed", state.Speed)
 
 	return {
-		ForwardSpeed = forwardSpeed,
-		Speed = speed,
-		GroundedWheels = groundedWheels,
-		SurfaceProfile = dominantSurface,
+		ForwardSpeed = state.Speed,
+		Speed = math.abs(state.Speed),
+		GroundedWheels = if grounded then 4 else 0,
+		SurfaceProfile = surfaceName,
 		FuelMultiplier = fuelMultiplier,
 		Grip = grip,
 	}

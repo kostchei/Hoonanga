@@ -25,25 +25,68 @@ local function getVehicleFromPart(part: Instance?): Model?
 end
 
 local function isPlayerDriving(player: Player, vehicle: Model): boolean
-	local seat = vehicle:FindFirstChild("DriverSeat")
-	if not seat or not seat:IsA("VehicleSeat") or not seat.Occupant then
-		return false
-	end
-	return Players:GetPlayerFromCharacter(seat.Occupant.Parent) == player
+	return VehicleService.GetPlayerVehicle(player) == vehicle
+		and vehicle:GetAttribute("OwnerUserId") == player.UserId
+		and vehicle:GetAttribute("Destroyed") ~= true
 end
 
-local function destroyVehicle(vehicle: Model)
+local function awardKill(sourceVehicle: Model?, targetVehicle: Model)
+	if not sourceVehicle or sourceVehicle == targetVehicle then
+		return
+	end
+	if sourceVehicle:GetAttribute("Team") == targetVehicle:GetAttribute("Team") then
+		return
+	end
+
+	local ownerUserId = sourceVehicle:GetAttribute("OwnerUserId")
+	if typeof(ownerUserId) ~= "number" or ownerUserId <= 0 then
+		return
+	end
+
+	local player = Players:GetPlayerByUserId(ownerUserId)
+	if not player then
+		return
+	end
+
+	local currentKills = player:GetAttribute("Kills")
+	if typeof(currentKills) ~= "number" then
+		currentKills = 0
+	end
+	local newKills = currentKills + 1
+	player:SetAttribute("Kills", newKills)
+	print(
+		string.format(
+			"[Hoonanga] %s destroyed %s (kills: %d)",
+			player.Name,
+			targetVehicle.Name,
+			newKills
+		)
+	)
+end
+
+local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
 	if vehicle:GetAttribute("Destroyed") then
 		return
 	end
 
 	vehicle:SetAttribute("Destroyed", true)
 	vehicle:SetAttribute("Hull", 0)
+	warn(string.format("[Hoonanga] Destroying %s", vehicle.Name))
+	awardKill(sourceVehicle, vehicle)
 	VehiclePhysics.Reset(vehicle)
 
 	local seat = vehicle:FindFirstChild("DriverSeat")
 	if seat and seat:IsA("VehicleSeat") and seat.Occupant then
 		seat.Occupant.Health = 0
+	end
+	local ownerUserId = vehicle:GetAttribute("OwnerUserId")
+	if typeof(ownerUserId) == "number" and ownerUserId > 0 then
+		local owner = Players:GetPlayerByUserId(ownerUserId)
+		local character = if owner then owner.Character else nil
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		if humanoid then
+			humanoid.Health = 0
+		end
 	end
 
 	local chassis = vehicle.PrimaryPart
@@ -68,7 +111,7 @@ local function destroyVehicle(vehicle: Model)
 	Debris:AddItem(vehicle, 8)
 end
 
-local function applyHullDamage(vehicle: Model, damage: number)
+local function applyHullDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
 	if vehicle:GetAttribute("Destroyed") then
 		return
 	end
@@ -81,7 +124,7 @@ local function applyHullDamage(vehicle: Model, damage: number)
 	hull = math.max(0, hull - damage)
 	vehicle:SetAttribute("Hull", hull)
 	if hull <= 0 then
-		destroyVehicle(vehicle)
+		destroyVehicle(vehicle, sourceVehicle)
 	end
 end
 
@@ -136,7 +179,7 @@ function CombatService.TryFire(vehicle: Model, desiredDirection: Vector3): boole
 		if targetVehicle and targetVehicle ~= vehicle then
 			local sameTeam = targetVehicle:GetAttribute("Team") == vehicle:GetAttribute("Team")
 			if not sameTeam then
-				applyHullDamage(targetVehicle, config.Damage)
+				applyHullDamage(targetVehicle, config.Damage, vehicle)
 			end
 		end
 	end

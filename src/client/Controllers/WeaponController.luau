@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
+local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("HoonangaRemotes")
@@ -19,17 +20,7 @@ local firing = false
 local lastLocalShot = 0
 
 local function currentVehicle(): Model?
-	local character = localPlayer.Character
-	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-	local seat = if humanoid then humanoid.SeatPart else nil
-	if not seat or not seat:IsA("VehicleSeat") then
-		return nil
-	end
-	local vehicle = seat:FindFirstAncestorOfClass("Model")
-	if vehicle and vehicle:GetAttribute("VehicleType") then
-		return vehicle
-	end
-	return nil
+	return VehicleLocator.ForPlayer(localPlayer)
 end
 
 local function drawTracer(origin: Vector3, endPosition: Vector3)

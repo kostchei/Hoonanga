@@ -75,6 +75,11 @@ end
 local AIService = {}
 
 function AIService.Start()
+	if not WorldConfig.Testing.EnemyEnabled then
+		print("[Hoonanga] Enemy ute disabled for initial driving test")
+		return
+	end
+
 	local vehiclesFolder = Workspace:WaitForChild("HoonangaWorld"):WaitForChild("Vehicles")
 	enemyVehicle = VehicleBuilder.CreateUte(
 		vehiclesFolder,
