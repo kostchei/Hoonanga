@@ -27,6 +27,10 @@ local CombatService = require(services.CombatService)
 local AIService = require(services.AIService)
 
 RemoteService.Start()
+local remotes = ReplicatedStorage:FindFirstChild("HoonangaRemotes")
+expect(remotes ~= nil, "RemoteService did not create HoonangaRemotes")
+expect(remotes:FindFirstChild("VehicleInput") ~= nil, "VehicleInput remote is missing")
+
 RoadService.Start()
 VehicleService.Start()
 PickupService.Start()

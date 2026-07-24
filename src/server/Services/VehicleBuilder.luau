@@ -66,6 +66,9 @@ function VehicleBuilder.CreateUte(
 	vehicle:SetAttribute("Ammo", 80)
 	vehicle:SetAttribute("ReserveAmmo", 240)
 	vehicle:SetAttribute("Reloading", false)
+	vehicle:SetAttribute("ServerThrottle", 0)
+	vehicle:SetAttribute("ServerSteer", 0)
+	vehicle:SetAttribute("ServerHandbrake", false)
 	vehicle:SetAttribute("Destroyed", false)
 
 	local chassis = makePart("Chassis", CHASSIS_SIZE, bodyColor, Enum.Material.Metal)

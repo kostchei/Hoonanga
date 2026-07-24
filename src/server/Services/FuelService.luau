@@ -48,8 +48,8 @@ local function updateVehicle(vehicle: Model, deltaTime: number)
 		return
 	end
 
-	local seat = vehicle:FindFirstChild("DriverSeat")
-	local throttle = if seat and seat:IsA("VehicleSeat") then math.abs(seat.ThrottleFloat) else 0
+	local serverThrottle = vehicle:GetAttribute("ServerThrottle")
+	local throttle = if typeof(serverThrottle) == "number" then math.abs(serverThrottle) else 0
 	local surfaceName, fuelMultiplier = sampleFuelMultiplier(vehicle)
 	local consumption = (config.IdleFuelPerSecond + throttle * config.ThrottleFuelPerSecond)
 		* fuelMultiplier

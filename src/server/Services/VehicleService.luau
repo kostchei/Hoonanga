@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
+local RemoteService = require(script.Parent.RemoteService)
 local VehicleBuilder = require(script.Parent.VehicleBuilder)
 
 local playerVehicles: { [Player]: Model } = {}
@@ -37,6 +38,9 @@ local function bindSeat(vehicle: Model)
 	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
 		local occupant = seat.Occupant
 		if not occupant then
+			vehicle:SetAttribute("ServerThrottle", 0)
+			vehicle:SetAttribute("ServerSteer", 0)
+			vehicle:SetAttribute("ServerHandbrake", false)
 			setNetworkOwner(vehicle, nil)
 			VehiclePhysics.Reset(vehicle)
 			return
@@ -90,6 +94,34 @@ end
 local VehicleService = {}
 
 function VehicleService.Start()
+	RemoteService.Get("VehicleInput").OnServerEvent
+		:Connect(function(player, throttle, steer, handbrake)
+			if
+				typeof(throttle) ~= "number"
+				or typeof(steer) ~= "number"
+				or typeof(handbrake) ~= "boolean"
+			then
+				return
+			end
+
+			local vehicle = playerVehicles[player]
+			if not vehicle or not vehicle.Parent then
+				return
+			end
+
+			local seat = vehicle:FindFirstChild("DriverSeat")
+			if not seat or not seat:IsA("VehicleSeat") or not seat.Occupant then
+				return
+			end
+			if Players:GetPlayerFromCharacter(seat.Occupant.Parent) ~= player then
+				return
+			end
+
+			vehicle:SetAttribute("ServerThrottle", math.clamp(throttle, -1, 1))
+			vehicle:SetAttribute("ServerSteer", math.clamp(steer, -1, 1))
+			vehicle:SetAttribute("ServerHandbrake", handbrake)
+		end)
+
 	for _, player in Players:GetPlayers() do
 		task.spawn(addPlayer, player)
 	end
