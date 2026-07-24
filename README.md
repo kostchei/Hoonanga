@@ -20,23 +20,41 @@ Welcome to **Hoonanga**, a high-octane Roblox driving experience built for speed
 
 ## 🛠️ Project Structure & Setup
 
-This repository is organized for modern Roblox development and compatible with tools like **Rojo** and **Wally**.
+This repository uses **Rojo** to sync version-controlled Luau code into Roblox Studio.
 
 ### Requirements & Recommended Tools
 - [Roblox Studio](https://create.roblox.com/)
-- [Rojo](https://rojo.space/) (For syncing code from VS Code / external editors to Roblox Studio)
-- [Wally](https://wally.run/) (Package manager for Luau)
+- [Rokit](https://github.com/rojo-rbx/rokit) (Pinned Roblox toolchain manager)
+- [Rojo](https://rojo.space/) (Filesystem-to-Studio synchronization)
 
 ### Development Workflow
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/Hoonanga.git
+   git clone https://github.com/kostchei/Hoonanga.git
    ```
-2. **Start Rojo live sync** (if using Rojo):
+2. **Install the pinned tools**:
+   ```bash
+   rokit install
+   ```
+3. **Install the Rojo Studio plugin**:
+   ```bash
+   rojo plugin install
+   ```
+4. **Start Rojo live sync**:
    ```bash
    rojo serve
    ```
-3. Open **Roblox Studio**, connect the Rojo plugin, and start building!
+5. Open **Roblox Studio**, connect the Rojo plugin to `localhost:34872`, and sync.
+
+### Validation
+
+```bash
+stylua --check src
+selene src
+rojo build default.project.json --output build/Hoonanga.rbxlx
+```
+
+See [the game design document](docs/GAME_DESIGN_DOCUMENT.md) for the agreed scope and milestone plan.
 
 ---
 

@@ -1,0 +1,51 @@
+{
+  "name": "Hoonanga",
+  "servePort": 34872,
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "StreamingEnabled": true,
+        "Gravity": 196.2
+      }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Ambient": [0.24, 0.19, 0.15],
+        "Brightness": 2.2,
+        "ClockTime": 16.5,
+        "EnvironmentDiffuseScale": 0.35,
+        "EnvironmentSpecularScale": 0.25,
+        "OutdoorAmbient": [0.47, 0.36, 0.27]
+      }
+    }
+  }
+}
