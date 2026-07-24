@@ -65,7 +65,16 @@ expect(foundSurfaces.Oil, "no playable oil surface was generated")
 local vehicles = world:FindFirstChild("Vehicles")
 expect(vehicles ~= nil, "Vehicles folder is missing")
 local enemy = vehicles:FindFirstChild("EnemyUte_01")
-expect(enemy == nil, "enemy ute should be disabled during initial driving tests")
+expect(enemy ~= nil, "AIService did not create the enemy ute")
+expect(enemy.PrimaryPart ~= nil, "enemy ute has no primary part")
+expect(
+	enemy.PrimaryPart:FindFirstChild("TurretMuzzleAttachment") ~= nil,
+	"enemy ute has no turret muzzle"
+)
+expect(
+	enemy.PrimaryPart:FindFirstChild("ForwardMuzzleAttachment") ~= nil,
+	"enemy ute has no forward muzzle"
+)
 
 print(
 	string.format(

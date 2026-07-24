@@ -55,6 +55,23 @@ local function bindSeat(vehicle: Model)
 	end)
 end
 
+local function createPlayerVehicle(player: Player): Model
+	local vehiclesFolder = Workspace:WaitForChild("HoonangaWorld"):WaitForChild("Vehicles")
+	local spawnOffset = (#Players:GetPlayers() - 1) * 12
+	local spawn = WorldConfig.Spawn.Player * CFrame.new(spawnOffset, 0, 0)
+	local vehicle = VehicleBuilder.CreateUte(
+		vehiclesFolder,
+		"PlayerUte_" .. player.UserId,
+		spawn,
+		Color3.fromRGB(184, 73, 42)
+	)
+	vehicle:SetAttribute("OwnerUserId", player.UserId)
+	vehicle:SetAttribute("Team", "Player")
+	playerVehicles[player] = vehicle
+	bindSeat(vehicle)
+	return vehicle
+end
+
 local function bindPlayerToVehicle(player: Player, character: Model)
 	local vehicle = playerVehicles[player]
 	if not vehicle or not vehicle.Parent then
@@ -131,22 +148,16 @@ end
 
 local function addPlayer(player: Player)
 	player:SetAttribute("Kills", 0)
-
-	local vehiclesFolder = Workspace:WaitForChild("HoonangaWorld"):WaitForChild("Vehicles")
-	local spawnOffset = (#Players:GetPlayers() - 1) * 12
-	local spawn = WorldConfig.Spawn.Player * CFrame.new(spawnOffset, 0, 0)
-	local vehicle = VehicleBuilder.CreateUte(
-		vehiclesFolder,
-		"PlayerUte_" .. player.UserId,
-		spawn,
-		Color3.fromRGB(184, 73, 42)
-	)
-	vehicle:SetAttribute("OwnerUserId", player.UserId)
-	vehicle:SetAttribute("Team", "Player")
-	playerVehicles[player] = vehicle
-	bindSeat(vehicle)
+	createPlayerVehicle(player)
 
 	player.CharacterAdded:Connect(function(character)
+		local vehicle = playerVehicles[player]
+		if not vehicle or not vehicle.Parent or vehicle:GetAttribute("Destroyed") then
+			if vehicle and vehicle.Parent then
+				vehicle:Destroy()
+			end
+			createPlayerVehicle(player)
+		end
 		task.defer(bindPlayerToVehicle, player, character)
 	end)
 

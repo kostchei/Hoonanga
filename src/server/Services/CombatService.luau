@@ -130,6 +130,37 @@ end
 
 local CombatService = {}
 
+local function fireRay(
+	vehicle: Model,
+	origin: Vector3,
+	direction: Vector3,
+	config: WeaponConfig.WeaponConfig
+)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { vehicle }
+	params.IgnoreWater = false
+
+	local result = Workspace:Raycast(origin, direction * config.Range, params)
+	local endPosition = origin + direction * config.Range
+	if result then
+		endPosition = result.Position
+		local targetVehicle = getVehicleFromPart(result.Instance)
+		if targetVehicle and targetVehicle ~= vehicle then
+			local sameTeam = targetVehicle:GetAttribute("Team") == vehicle:GetAttribute("Team")
+			if not sameTeam then
+				local damageMultiplier = vehicle:GetAttribute("DamageMultiplier")
+				if typeof(damageMultiplier) ~= "number" then
+					damageMultiplier = 1
+				end
+				applyHullDamage(targetVehicle, config.Damage * damageMultiplier, vehicle)
+			end
+		end
+	end
+
+	RemoteService.Get("WeaponFired"):FireAllClients(origin, endPosition)
+end
+
 function CombatService.TryFire(vehicle: Model, desiredDirection: Vector3): boolean
 	if vehicle:GetAttribute("Destroyed") or desiredDirection.Magnitude < 0.9 then
 		return false
@@ -140,10 +171,10 @@ function CombatService.TryFire(vehicle: Model, desiredDirection: Vector3): boole
 		return false
 	end
 
-	local config = WeaponConfig.MachineGun
+	local turretConfig = WeaponConfig.MachineGun
 	local now = Workspace:GetServerTimeNow()
 	local lastShot = lastShotAt[vehicle] or 0
-	if now - lastShot < config.FireInterval * 0.9 then
+	if now - lastShot < turretConfig.FireInterval * 0.9 then
 		return false
 	end
 
@@ -152,39 +183,33 @@ function CombatService.TryFire(vehicle: Model, desiredDirection: Vector3): boole
 		return false
 	end
 
-	local direction = desiredDirection.Unit
-	if direction:Dot(chassis.CFrame.LookVector) < math.cos(math.rad(96)) then
+	local turretMuzzle = chassis:FindFirstChild("TurretMuzzleAttachment")
+	if not turretMuzzle or not turretMuzzle:IsA("Attachment") then
 		return false
 	end
 
-	local muzzle = chassis:FindFirstChild("MuzzleAttachment")
-	if not muzzle or not muzzle:IsA("Attachment") then
-		return false
-	end
+	local aimDirection = desiredDirection.Unit
+	local forwardAlignment = aimDirection:Dot(chassis.CFrame.LookVector)
+	local forwardGunActive = forwardAlignment
+			>= math.cos(math.rad(WeaponConfig.ForwardGunConeDegrees))
+		and ammo >= 2
 
 	lastShotAt[vehicle] = now
-	vehicle:SetAttribute("Ammo", ammo - 1)
+	vehicle:SetAttribute("Ammo", ammo - (if forwardGunActive then 2 else 1))
+	fireRay(vehicle, turretMuzzle.WorldPosition, aimDirection, turretConfig)
 
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { vehicle }
-	params.IgnoreWater = false
-
-	local origin = muzzle.WorldPosition
-	local result = Workspace:Raycast(origin, direction * config.Range, params)
-	local endPosition = origin + direction * config.Range
-	if result then
-		endPosition = result.Position
-		local targetVehicle = getVehicleFromPart(result.Instance)
-		if targetVehicle and targetVehicle ~= vehicle then
-			local sameTeam = targetVehicle:GetAttribute("Team") == vehicle:GetAttribute("Team")
-			if not sameTeam then
-				applyHullDamage(targetVehicle, config.Damage, vehicle)
-			end
+	if forwardGunActive then
+		local forwardMuzzle = chassis:FindFirstChild("ForwardMuzzleAttachment")
+		if forwardMuzzle and forwardMuzzle:IsA("Attachment") then
+			fireRay(
+				vehicle,
+				forwardMuzzle.WorldPosition,
+				chassis.CFrame.LookVector,
+				WeaponConfig.ForwardGun
+			)
 		end
 	end
 
-	RemoteService.Get("WeaponFired"):FireAllClients(origin, endPosition)
 	return true
 end
 

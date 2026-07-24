@@ -13,6 +13,7 @@ local VehicleService = require(script.Parent.VehicleService)
 
 local enemyVehicle: Model? = nil
 local lastFireAttempt = 0
+local AI_FIRE_INTERVAL = 0.55
 
 local function targetVehicle(): Model?
 	for _, player in Players:GetPlayers() do
@@ -57,15 +58,15 @@ local function updateEnemy(deltaTime: number)
 	}, deltaTime)
 
 	if target and target.PrimaryPart then
-		local muzzle = chassis:FindFirstChild("MuzzleAttachment")
+		local muzzle = chassis:FindFirstChild("TurretMuzzleAttachment")
 		if muzzle and muzzle:IsA("Attachment") then
 			local now = Workspace:GetServerTimeNow()
-			if now - lastFireAttempt >= 0.18 then
+			if now - lastFireAttempt >= AI_FIRE_INTERVAL then
 				lastFireAttempt = now
 				local predictedPosition = target.PrimaryPart.Position
 					+ target.PrimaryPart.AssemblyLinearVelocity * 0.08
 				local aimError =
-					Vector3.new(math.noise(now * 0.7) * 2.5, math.noise(now * 0.8 + 10) * 1.4, 0)
+					Vector3.new(math.noise(now * 0.7) * 7, math.noise(now * 0.8 + 10) * 4, 0)
 				CombatService.TryFire(vehicle, predictedPosition + aimError - muzzle.WorldPosition)
 			end
 		end
@@ -89,6 +90,7 @@ function AIService.Start()
 	)
 	enemyVehicle:SetAttribute("OwnerUserId", 0)
 	enemyVehicle:SetAttribute("Team", "Enemy")
+	enemyVehicle:SetAttribute("DamageMultiplier", 0.2)
 
 	local chassis = enemyVehicle.PrimaryPart
 	if chassis and chassis:CanSetNetworkOwnership() then

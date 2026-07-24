@@ -1,14 +1,20 @@
 --!strict
 
+local AssetService = game:GetService("AssetService")
 local CollectionService = game:GetService("CollectionService")
 
 local CHASSIS_SIZE = Vector3.new(6.4, 1.8, 10.4)
+local TURRET_ASSET_ID = 2046384884
+local TURRET_SOURCE_URL = "https://create.roblox.com/store/asset/2046384884/Machine-Gun-Turret"
 local WHEEL_OFFSETS = {
 	FL = Vector3.new(-3.35, -1.05, -3.35),
 	FR = Vector3.new(3.35, -1.05, -3.35),
 	RL = Vector3.new(-3.35, -1.05, 3.35),
 	RR = Vector3.new(3.35, -1.05, 3.35),
 }
+
+local turretAssetAttempted = false
+local turretAssetTemplate: Model? = nil
 
 local function makePart(name: string, size: Vector3, color: Color3, material: Enum.Material): Part
 	local part = Instance.new("Part")
@@ -45,6 +51,113 @@ local function addSuspension(chassis: Part, corner: string, offset: Vector3)
 	force.RelativeTo = Enum.ActuatorRelativeTo.World
 	force.Force = Vector3.zero
 	force.Parent = chassis
+end
+
+local function getTurretAssetTemplate(): Model?
+	if turretAssetAttempted then
+		return turretAssetTemplate
+	end
+	turretAssetAttempted = true
+
+	local success, result = pcall(function()
+		return AssetService:LoadAssetAsync(TURRET_ASSET_ID)
+	end)
+	if not success or not result or not result:IsA("Model") then
+		warn(
+			string.format(
+				"[Hoonanga] Creator Store turret %d unavailable; using safe fallback",
+				TURRET_ASSET_ID
+			)
+		)
+		return nil
+	end
+
+	for _, descendant in result:GetDescendants() do
+		if descendant:IsA("LuaSourceContainer") then
+			descendant:Destroy()
+		end
+	end
+	result.Parent = nil
+	turretAssetTemplate = result
+	print(string.format("[Hoonanga] Loaded no-script Creator Store turret %d", TURRET_ASSET_ID))
+	return turretAssetTemplate
+end
+
+local function mountFallbackTurret(vehicle: Model, chassis: Part)
+	local pedestal = makePart(
+		"TurretPedestal",
+		Vector3.new(2.2, 0.55, 2.2),
+		Color3.fromRGB(52, 50, 46),
+		Enum.Material.Metal
+	)
+	pedestal.Shape = Enum.PartType.Cylinder
+	pedestal.CanCollide = false
+	weldToChassis(chassis, pedestal, CFrame.new(0, 3.25, 1.55) * CFrame.Angles(0, 0, math.rad(90)))
+	pedestal.Parent = vehicle
+
+	local receiver = makePart(
+		"TurretReceiver",
+		Vector3.new(1.2, 0.9, 1.8),
+		Color3.fromRGB(39, 40, 38),
+		Enum.Material.Metal
+	)
+	receiver.CanCollide = false
+	weldToChassis(chassis, receiver, CFrame.new(0, 3.75, 1.2))
+	receiver.Parent = vehicle
+
+	local barrel = makePart(
+		"TurretBarrel",
+		Vector3.new(0.32, 0.32, 4.4),
+		Color3.fromRGB(30, 31, 30),
+		Enum.Material.Metal
+	)
+	barrel.CanCollide = false
+	weldToChassis(chassis, barrel, CFrame.new(0, 3.82, -1.8))
+	barrel.Parent = vehicle
+end
+
+local function mountStoreTurret(vehicle: Model, chassis: Part): boolean
+	local template = getTurretAssetTemplate()
+	if not template then
+		return false
+	end
+
+	local turret = template:Clone()
+	turret.Name = "CreatorStoreTurret"
+	turret:SetAttribute("SourceAssetId", TURRET_ASSET_ID)
+	turret:SetAttribute("SourceUrl", TURRET_SOURCE_URL)
+	turret.Parent = vehicle
+
+	local _, size = turret:GetBoundingBox()
+	local longestSide = math.max(size.X, size.Y, size.Z)
+	if longestSide > 0.01 then
+		turret:ScaleTo(4.5 / longestSide)
+	end
+	turret:PivotTo(chassis.CFrame * CFrame.new(0, 3.65, 1.4))
+
+	local partCount = 0
+	for _, descendant in turret:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			partCount += 1
+			descendant.Anchored = false
+			descendant.CanCollide = false
+			descendant.CanQuery = false
+			descendant.CanTouch = false
+			descendant.Massless = true
+
+			local weld = Instance.new("WeldConstraint")
+			weld.Name = "TurretChassisWeld"
+			weld.Part0 = chassis
+			weld.Part1 = descendant
+			weld.Parent = descendant
+		end
+	end
+
+	if partCount == 0 then
+		turret:Destroy()
+		return false
+	end
+	return true
 end
 
 local VehicleBuilder = {}
@@ -182,13 +295,22 @@ function VehicleBuilder.CreateUte(
 
 	local cameraAttachment = Instance.new("Attachment")
 	cameraAttachment.Name = "CameraAttachment"
-	cameraAttachment.Position = Vector3.new(0, 3, -0.5)
+	cameraAttachment.Position = Vector3.new(0, 4.8, 0.4)
 	cameraAttachment.Parent = chassis
 
-	local muzzleAttachment = Instance.new("Attachment")
-	muzzleAttachment.Name = "MuzzleAttachment"
-	muzzleAttachment.Position = Vector3.new(0, 2.45, -5.45)
-	muzzleAttachment.Parent = chassis
+	local turretMuzzle = Instance.new("Attachment")
+	turretMuzzle.Name = "TurretMuzzleAttachment"
+	turretMuzzle.Position = Vector3.new(0, 3.82, -4.05)
+	turretMuzzle.Parent = chassis
+
+	local forwardMuzzle = Instance.new("Attachment")
+	forwardMuzzle.Name = "ForwardMuzzleAttachment"
+	forwardMuzzle.Position = Vector3.new(0, 2.1, -5.45)
+	forwardMuzzle.Parent = chassis
+
+	if not mountStoreTurret(vehicle, chassis) then
+		mountFallbackTurret(vehicle, chassis)
+	end
 
 	vehicle:PivotTo(spawnCFrame)
 	vehicle.Parent = parent

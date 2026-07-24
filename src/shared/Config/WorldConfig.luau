@@ -10,10 +10,10 @@ return {
 		RecycleDistance = 4096,
 	},
 	Testing = {
-		EnemyEnabled = false,
+		EnemyEnabled = true,
 	},
 	Spawn = {
 		Player = CFrame.new(-10, 4, 120),
-		Enemy = CFrame.new(12, 4, 35),
+		Enemy = CFrame.new(12, 4, -80),
 	},
 }

@@ -18,6 +18,17 @@ local machineGun: WeaponConfig = {
 	SpreadDegrees = 1.1,
 }
 
+local forwardGun: WeaponConfig = {
+	FireInterval = 0.1,
+	Damage = 8,
+	Range = 750,
+	MagazineSize = 80,
+	ReloadTime = 2.4,
+	SpreadDegrees = 0.55,
+}
+
 return {
 	MachineGun = machineGun,
+	ForwardGun = forwardGun,
+	ForwardGunConeDegrees = 14,
 }

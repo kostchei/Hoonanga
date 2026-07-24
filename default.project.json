@@ -18,6 +18,13 @@
       }
     },
 
+    "AssetService": {
+      "$className": "AssetService",
+      "$properties": {
+        "AllowInsertFreeAssets": true
+      }
+    },
+
     "StarterPlayer": {
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
