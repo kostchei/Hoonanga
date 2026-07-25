@@ -87,6 +87,9 @@ local function bindSeat(vehicle: Model)
 end
 
 local function createPlayerVehicle(player: Player): Model
+	-- Each new vehicle starts a new run, per the design doc's run-level
+	-- loop (a run ends at vehicle destruction; kills belong to that run).
+	player:SetAttribute("Kills", 0)
 	local vehiclesFolder = Workspace:WaitForChild("HoonangaWorld"):WaitForChild("Vehicles")
 	local spawnOffset = (#Players:GetPlayers() - 1) * 12
 	local spawn = WorldConfig.Spawn.Player * CFrame.new(spawnOffset, 0, 0)
@@ -239,7 +242,6 @@ local function bindPlayerToVehicle(player: Player, character: Model)
 end
 
 local function addPlayer(player: Player)
-	player:SetAttribute("Kills", 0)
 	createPlayerVehicle(player)
 
 	player.CharacterAdded:Connect(function(character)

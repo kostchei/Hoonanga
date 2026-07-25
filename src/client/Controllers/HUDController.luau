@@ -123,13 +123,13 @@ function HUDController.Start()
 			then "RELOADING"
 			else string.format("%02d / %03d", magazine, reserve)
 
+		-- VehicleLocator only ever returns non-destroyed vehicles, so this
+		-- can only ever be the out-of-fuel case; the destroyed/run-over
+		-- case is handled by RunResultController instead, since by the
+		-- time Destroyed is true this HUD's vehicle lookup already returns
+		-- nil and the whole status block above is hidden.
 		warning.Visible = vehicle:GetAttribute("OutOfFuel") == true
-			or vehicle:GetAttribute("Destroyed") == true
-		if vehicle:GetAttribute("Destroyed") then
-			warning.Text = "VEHICLE DESTROYED"
-		elseif vehicle:GetAttribute("OutOfFuel") then
-			warning.Text = "OUT OF FUEL"
-		end
+		warning.Text = "OUT OF FUEL"
 	end)
 end
 
