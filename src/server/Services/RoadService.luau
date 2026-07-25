@@ -227,6 +227,32 @@ local function addSockets(chunk: Model, centerZ: number, chunkLength: number)
 	socketEnd.Parent = chunk
 end
 
+-- Every ground-level chunk lays this first, spanning the full chunk width,
+-- before anything narrower goes on top. Families whose feature geometry is
+-- narrower than the chunk (the canyon floor, the fork's split lanes) would
+-- otherwise leave the uncovered remainder as open air, which is a pit at
+-- speed rather than a visible edge. road_coverage_test.luau guards this.
+local function addBaseTerrain(
+	chunk: Model,
+	index: number,
+	centerZ: number,
+	name: string,
+	profile: string,
+	color: Color3,
+	material: Enum.Material
+)
+	local road = WorldConfig.Road
+	makeSurface(
+		chunk,
+		name,
+		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
+		CFrame.new(0, ROAD_Y, centerZ) * CFrame.new(0, -0.55, 0),
+		profile,
+		variegate(color, index, 0.35),
+		material
+	)
+end
+
 -- Shared layout for the ground-level families: wide drivable terrain with a
 -- clear good-ground road down the middle, plus the occasional hazard sitting
 -- on that road. Hazard cadence is index-driven rather than random so a run
@@ -376,6 +402,18 @@ local function configureCanyonChunk(chunk: Model, index: number, centerZ: number
 	local road = WorldConfig.Road
 	local center = CFrame.new(0, ROAD_Y, centerZ)
 
+	-- Rock shelf running the full chunk width, so the ground outside the
+	-- canyon walls is solid. The walls are the boundary, not a cliff edge.
+	addBaseTerrain(
+		chunk,
+		index,
+		centerZ,
+		"CanyonShelf",
+		"LooseStone",
+		ROAD_COLORS.CanyonRock,
+		Enum.Material.Rock
+	)
+
 	makeSurface(
 		chunk,
 		"CanyonFloor",
@@ -523,9 +561,22 @@ end
 -- Left lane trades grip for a fuel pickup, right lane keeps normal grip and
 -- offers nothing - a direct instance of GDD 8.7's example tradeoff ("exposed
 -- highway with fuel versus protected canyon without fuel").
-local function configureForkChunk(chunk: Model, centerZ: number)
+local function configureForkChunk(chunk: Model, index: number, centerZ: number)
 	local center = CFrame.new(0, ROAD_Y, centerZ)
 	local laneOffset = FORK_LANE_WIDTH / 2 + 10
+
+	-- Solid ground under the whole chunk. The lanes and the boulder divider
+	-- sit on top of it: the divider should make you commit to a side, not
+	-- open a pit down the centre line you were already driving along.
+	addBaseTerrain(
+		chunk,
+		index,
+		centerZ,
+		"ForkGround",
+		"LooseStone",
+		ROAD_COLORS.LooseStone,
+		Enum.Material.Slate
+	)
 
 	local leftLane = makeSurface(
 		chunk,
@@ -572,7 +623,7 @@ local function configureChunk(chunk: Model, index: number)
 	if chunksUntilFork <= 0 and currentFamily ~= "RaisedHighway" then
 		chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 		chunk:SetAttribute("RoadFamily", "Fork")
-		configureForkChunk(chunk, centerZ)
+		configureForkChunk(chunk, index, centerZ)
 	else
 		if chunksUntilFork > 0 then
 			chunksUntilFork -= 1
