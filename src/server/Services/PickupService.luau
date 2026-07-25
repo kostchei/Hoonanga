@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local CombatService = require(script.Parent.CombatService)
+local ConvoyService = require(script.Parent.ConvoyService)
 local WeaponService = require(script.Parent.WeaponService)
 
 local PICKUP_TAG = "HoonangaPickup"
@@ -30,6 +31,10 @@ local function requireNumber(instance: Instance, attribute: string): number
 end
 
 local function collectFuel(vehicle: Model, amount: number): boolean
+	local convoy = ConvoyService.GetByVehicle(vehicle)
+	if convoy then
+		return ConvoyService.AddFuel(convoy, amount) > 0
+	end
 	local fuel = requireNumber(vehicle, "Fuel")
 	local maxFuel = requireNumber(vehicle, "MaxFuel")
 	if fuel >= maxFuel then
@@ -51,7 +56,9 @@ local function collect(pickup: BasePart, vehicle: Model): boolean
 	if pickupType == "Fuel" then
 		return collectFuel(vehicle, amount)
 	elseif pickupType == "Repair" then
-		return CombatService.Repair(vehicle, amount) > 0
+		local convoy = ConvoyService.GetByVehicle(vehicle)
+		local repairTarget = if convoy then ConvoyService.FindMostDamaged(convoy) else vehicle
+		return repairTarget ~= nil and CombatService.Repair(repairTarget, amount) > 0
 	elseif WeaponConfig.AmmoPools[pickupType] then
 		return WeaponService.AddAmmo(vehicle, pickupType, amount) > 0
 	end

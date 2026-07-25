@@ -45,13 +45,6 @@ type CornerState = {
 -- which is what produced the reported cab jitter. SteeringTorque only
 -- drives yaw, a rotational axis the suspension corners don't directly
 -- control, so it doesn't have that problem.
-local WHEEL_CORNERS = {
-	{ Name = "FL", Offset = Vector3.new(-3.05, -1.05, -4.65), Front = true },
-	{ Name = "FR", Offset = Vector3.new(3.05, -1.05, -4.65), Front = true },
-	{ Name = "RL", Offset = Vector3.new(-3.05, -1.05, 4.65), Front = false },
-	{ Name = "RR", Offset = Vector3.new(3.05, -1.05, 4.65), Front = false },
-}
-
 local DOWNFORCE_SCALE = 0.018
 local AIR_DRAG = 0.045
 local HANDBRAKE_REAR_GRIP = 0.28
@@ -107,15 +100,15 @@ local function zeroActuators(chassis: BasePart)
 		steeringTorque.Torque = Vector3.zero
 	end
 
-	for _, corner in WHEEL_CORNERS do
-		local suspension = chassis:FindFirstChild("Suspension" .. corner.Name)
-		if suspension and suspension:IsA("VectorForce") then
-			suspension.Force = Vector3.zero
-		end
-
-		local lateralGrip = chassis:FindFirstChild("LateralGrip" .. corner.Name)
-		if lateralGrip and lateralGrip:IsA("VectorForce") then
-			lateralGrip.Force = Vector3.zero
+	for _, child in chassis:GetChildren() do
+		if
+			child:IsA("VectorForce")
+			and (
+				string.sub(child.Name, 1, 10) == "Suspension"
+				or string.sub(child.Name, 1, 11) == "LateralGrip"
+			)
+		then
+			child.Force = Vector3.zero
 		end
 	end
 end
@@ -172,7 +165,7 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	local fuelMultiplier = 1
 	local bogRate = 0
 
-	for _, corner in WHEEL_CORNERS do
+	for _, corner in config.WheelContacts do
 		local attachment = chassis:FindFirstChild("SuspensionPoint" .. corner.Name)
 		local suspension = chassis:FindFirstChild("Suspension" .. corner.Name)
 		if
@@ -237,7 +230,7 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	-- this below 1 so the player can actually run them down.
 	local speedScaleAttribute = vehicle:GetAttribute("MaxSpeedScale")
 	local speedScale = if typeof(speedScaleAttribute) == "number"
-		then math.clamp(speedScaleAttribute, 0.1, 1)
+		then math.clamp(speedScaleAttribute, 0.1, 1.15)
 		else 1
 
 	local bogDriveScale = 1 - state.BogLevel * 0.82
@@ -329,7 +322,7 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 		steeringTorque.Torque = up * yawTorque
 	end
 
-	for _, corner in WHEEL_CORNERS do
+	for _, corner in config.WheelContacts do
 		local lateralGrip = chassis:FindFirstChild("LateralGrip" .. corner.Name)
 		if lateralGrip and lateralGrip:IsA("VectorForce") then
 			local cornerState = cornerStates[corner.Name]
@@ -344,7 +337,8 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 					then gripCoefficient * HANDBRAKE_REAR_GRIP
 					else gripCoefficient
 
-				lateralGrip.Force = wheelRight * (-lateralSlip * cornerGrip * (mass / 4))
+				lateralGrip.Force = wheelRight
+					* (-lateralSlip * cornerGrip * (mass / #config.WheelContacts))
 			else
 				lateralGrip.Force = Vector3.zero
 			end
@@ -357,6 +351,14 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	vehicle:SetAttribute("GroundedWheels", groundedWheels)
 	vehicle:SetAttribute("BogLevel", state.BogLevel)
 	vehicle:SetAttribute("Bogged", state.BogLevel >= 0.85)
+	if getVehicleType(vehicle) == "Bike" then
+		-- Replicated visual cue for a stable, raycast-supported bike. Rendering
+		-- can lean the body without making balance a competing physics system.
+		vehicle:SetAttribute(
+			"VisualLeanDegrees",
+			math.clamp(-steer * math.abs(forwardSpeed) * 0.16, -18, 18)
+		)
+	end
 
 	return {
 		ForwardSpeed = forwardSpeed,

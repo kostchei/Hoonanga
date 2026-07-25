@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local REMOTE_NAMES = {
 	"FireWeapon",
 	"ReloadWeapon",
+	"SelectConvoyClass",
 	"SelectWeapon",
 	"VehicleInput",
 	"WeaponFired",

@@ -4,6 +4,7 @@ local AssetService = game:GetService("AssetService")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local VehicleConfig = require(ReplicatedStorage.Shared.Config.VehicleConfig)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 
 local CHASSIS_SIZE = Vector3.new(6.4, 1.8, 15.4)
@@ -40,6 +41,7 @@ local pickupBodyTemplates: { [string]: Model } = {}
 local turretAssetLoaded = false
 local turretAssetLoading = false
 local turretAssetTemplate: Model? = nil
+local assetLoadingEnabled = true
 
 local function makePart(name: string, size: Vector3, color: Color3, material: Enum.Material): Part
 	local part = Instance.new("Part")
@@ -168,6 +170,9 @@ local function loadPickupBodyTemplates()
 end
 
 local function mountPickupBody(vehicle: Model, chassis: Part, bodyColor: Color3): boolean
+	if not assetLoadingEnabled then
+		return false
+	end
 	loadPickupBodyTemplates()
 
 	local variantName = if bodyColor.B > bodyColor.R
@@ -211,6 +216,9 @@ local function mountPickupBody(vehicle: Model, chassis: Part, bodyColor: Color3)
 end
 
 local function getTurretAssetTemplate(): Model?
+	if not assetLoadingEnabled then
+		return nil
+	end
 	if turretAssetLoaded then
 		return turretAssetTemplate
 	end
@@ -333,21 +341,29 @@ end
 
 local VehicleBuilder = {}
 
+function VehicleBuilder.SetAssetLoadingEnabledForTests(enabled: boolean)
+	assetLoadingEnabled = enabled
+end
+
 function VehicleBuilder.CreateUte(
 	parent: Instance,
 	name: string,
 	spawnCFrame: CFrame,
 	bodyColor: Color3
 ): Model
+	local config = VehicleConfig.Ute
 	local vehicle = Instance.new("Model")
 	vehicle.Name = name
 	vehicle:SetAttribute("VehicleType", "Ute")
-	vehicle:SetAttribute("Hull", 100)
-	vehicle:SetAttribute("MaxHull", 100)
-	vehicle:SetAttribute("OperatorHealth", 100)
-	vehicle:SetAttribute("MaxOperatorHealth", 100)
-	vehicle:SetAttribute("Fuel", 300)
-	vehicle:SetAttribute("MaxFuel", 300)
+	vehicle:SetAttribute("Hull", config.MaxHull)
+	vehicle:SetAttribute("MaxHull", config.MaxHull)
+	vehicle:SetAttribute("OperatorHealth", config.MaxOperatorHealth)
+	vehicle:SetAttribute("MaxOperatorHealth", config.MaxOperatorHealth)
+	vehicle:SetAttribute("OperatorAlive", true)
+	vehicle:SetAttribute("PersonnelProtected", config.PersonnelProtected)
+	vehicle:SetAttribute("Fuel", config.FuelCapacity)
+	vehicle:SetAttribute("MaxFuel", config.FuelCapacity)
+	vehicle:SetAttribute("FuelConsumptionMultiplier", config.FuelConsumptionMultiplier)
 	vehicle:SetAttribute("OutOfFuel", false)
 	-- GDD 11.5 fire state. Heat is the accumulator FireService drives; every
 	-- vehicle carries it from birth so nothing has to test for its absence.
@@ -362,8 +378,8 @@ function VehicleBuilder.CreateUte(
 	-- GDD 11.4 ram: equipment modifies impact damage dealt and received. The
 	-- base ute has no ram equipment, so both are neutral until a garage
 	-- fitting changes them.
-	vehicle:SetAttribute("RamDealtMultiplier", 1)
-	vehicle:SetAttribute("RamReceivedMultiplier", 1)
+	vehicle:SetAttribute("RamDealtMultiplier", config.RamDealtMultiplier)
+	vehicle:SetAttribute("RamReceivedMultiplier", config.RamReceivedMultiplier)
 	vehicle:SetAttribute("MuzzleBlocked", false)
 	vehicle:SetAttribute("AimOutOfTraverse", false)
 	WeaponState.Initialise(vehicle)
@@ -371,6 +387,7 @@ function VehicleBuilder.CreateUte(
 	vehicle:SetAttribute("ServerSteer", 0)
 	vehicle:SetAttribute("ServerHandbrake", false)
 	vehicle:SetAttribute("Destroyed", false)
+	vehicle:SetAttribute("Operational", true)
 
 	local chassis = makePart("Chassis", CHASSIS_SIZE, bodyColor, Enum.Material.Metal)
 	chassis.Anchored = true
@@ -545,6 +562,244 @@ function VehicleBuilder.CreateUte(
 	chassis.Anchored = false
 
 	return vehicle
+end
+
+local function createGrayboxVehicle(
+	vehicleType: string,
+	parent: Instance,
+	name: string,
+	spawnCFrame: CFrame,
+	bodyColor: Color3
+): Model
+	local config = VehicleConfig[vehicleType]
+	assert(config, string.format("Unknown vehicle type %q", vehicleType))
+
+	local vehicle = Instance.new("Model")
+	vehicle.Name = name
+	vehicle:SetAttribute("VehicleType", vehicleType)
+	vehicle:SetAttribute("Hull", config.MaxHull)
+	vehicle:SetAttribute("MaxHull", config.MaxHull)
+	vehicle:SetAttribute("OperatorHealth", config.MaxOperatorHealth)
+	vehicle:SetAttribute("MaxOperatorHealth", config.MaxOperatorHealth)
+	vehicle:SetAttribute("OperatorAlive", true)
+	vehicle:SetAttribute("PersonnelProtected", config.PersonnelProtected)
+	vehicle:SetAttribute("Fuel", config.FuelCapacity)
+	vehicle:SetAttribute("MaxFuel", config.FuelCapacity)
+	vehicle:SetAttribute("FuelConsumptionMultiplier", config.FuelConsumptionMultiplier)
+	vehicle:SetAttribute("OutOfFuel", false)
+	vehicle:SetAttribute("Heat", 0)
+	vehicle:SetAttribute("FireState", "None")
+	vehicle:SetAttribute("ForwardSpeed", 0)
+	vehicle:SetAttribute("DamageMultiplier", 1)
+	vehicle:SetAttribute("RamDealtMultiplier", config.RamDealtMultiplier)
+	vehicle:SetAttribute("RamReceivedMultiplier", config.RamReceivedMultiplier)
+	vehicle:SetAttribute("MuzzleBlocked", false)
+	vehicle:SetAttribute("AimOutOfTraverse", false)
+	vehicle:SetAttribute("ServerThrottle", 0)
+	vehicle:SetAttribute("ServerSteer", 0)
+	vehicle:SetAttribute("ServerHandbrake", false)
+	vehicle:SetAttribute("Destroyed", false)
+	vehicle:SetAttribute("Operational", true)
+	WeaponState.Initialise(vehicle)
+
+	local chassis = makePart("Chassis", config.ChassisSize, bodyColor, Enum.Material.Metal)
+	chassis.Anchored = true
+	chassis.RootPriority = 127
+	chassis.CustomPhysicalProperties = PhysicalProperties.new(
+		if vehicleType == "Roadtrain" then 4.2 elseif vehicleType == "Bike" then 1.45 else 2.4,
+		0.5,
+		0.05,
+		1,
+		1
+	)
+	chassis.Parent = vehicle
+	vehicle.PrimaryPart = chassis
+
+	local ballast =
+		makePart("Ballast", config.BallastSize, Color3.fromRGB(30, 30, 30), Enum.Material.Metal)
+	ballast.Transparency = 1
+	ballast.CanCollide = false
+	ballast.Massless = false
+	ballast.CustomPhysicalProperties = PhysicalProperties.new(6, 0, 0, 100, 100)
+	weldToChassis(chassis, ballast, CFrame.new(config.BallastOffset))
+	ballast.Parent = vehicle
+
+	local body = makePart("Body", config.BodySize, bodyColor, Enum.Material.Metal)
+	body.CanCollide = false
+	weldToChassis(chassis, body, CFrame.new(config.BodyOffset))
+	body.Parent = vehicle
+
+	if vehicleType == "Roadtrain" then
+		local cabin = makePart(
+			"Cabin",
+			Vector3.new(8.2, 4.6, 6.8),
+			bodyColor:Lerp(Color3.new(0, 0, 0), 0.12),
+			Enum.Material.Metal
+		)
+		cabin.CanCollide = false
+		weldToChassis(chassis, cabin, CFrame.new(0, 4.1, -7.2))
+		cabin.Parent = vehicle
+		local tray = makePart(
+			"CargoDeck",
+			Vector3.new(8.4, 0.8, 11.2),
+			Color3.fromRGB(80, 72, 63),
+			Enum.Material.DiamondPlate
+		)
+		tray.CanCollide = false
+		weldToChassis(chassis, tray, CFrame.new(0, 3.25, 4.2))
+		tray.Parent = vehicle
+	else
+		local tank = makePart(
+			"FuelTankVisual",
+			Vector3.new(2.1, 1.5, 2.8),
+			bodyColor:Lerp(Color3.new(1, 1, 1), 0.08),
+			Enum.Material.Metal
+		)
+		tank.CanCollide = false
+		weldToChassis(chassis, tank, CFrame.new(0, 1.75, -0.6))
+		tank.Parent = vehicle
+	end
+
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "DriverSeat"
+	seat.Size = if vehicleType == "Bike"
+		then Vector3.new(1.4, 0.7, 1.8)
+		else Vector3.new(2.4, 1, 2.4)
+	seat.Color = Color3.fromRGB(40, 40, 40)
+	seat.Material = Enum.Material.SmoothPlastic
+	seat.CanCollide = false
+	seat.Disabled = false
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	weldToChassis(chassis, seat, CFrame.new(config.SeatOffset))
+	seat.Parent = vehicle
+
+	local personnelHitbox = makePart(
+		"PersonnelHitbox",
+		config.PersonnelHitboxSize,
+		bodyColor,
+		Enum.Material.SmoothPlastic
+	)
+	personnelHitbox.Transparency = 1
+	personnelHitbox.CanCollide = false
+	personnelHitbox.CanTouch = false
+	personnelHitbox.CanQuery = not config.PersonnelProtected
+	weldToChassis(chassis, personnelHitbox, CFrame.new(config.SeatOffset + Vector3.new(0, 1.1, 0)))
+	personnelHitbox.Parent = vehicle
+
+	for _, contact in config.WheelContacts do
+		addSuspension(chassis, contact.Name, contact.Offset)
+	end
+
+	if vehicleType == "Bike" then
+		for _, wheelOffset in
+			{
+				Vector3.new(0, -0.7, -2.65),
+				Vector3.new(0, -0.7, 2.6),
+			}
+		do
+			local wheel = makePart(
+				"BikeWheel",
+				Vector3.new(0.65, 2.7, 2.7),
+				Color3.fromRGB(24, 24, 24),
+				Enum.Material.Rubber
+			)
+			wheel.Shape = Enum.PartType.Cylinder
+			wheel.CanCollide = false
+			weldToChassis(
+				chassis,
+				wheel,
+				CFrame.new(wheelOffset) * CFrame.Angles(0, 0, math.rad(90))
+			)
+			wheel.Parent = vehicle
+		end
+	end
+
+	local centerAttachment = Instance.new("Attachment")
+	centerAttachment.Name = "CenterAttachment"
+	centerAttachment.Parent = chassis
+
+	local driveForce = Instance.new("VectorForce")
+	driveForce.Name = "DriveForce"
+	driveForce.Attachment0 = centerAttachment
+	driveForce.ApplyAtCenterOfMass = true
+	driveForce.RelativeTo = Enum.ActuatorRelativeTo.World
+	driveForce.Force = Vector3.zero
+	driveForce.Parent = chassis
+
+	local steeringTorque = Instance.new("Torque")
+	steeringTorque.Name = "SteeringTorque"
+	steeringTorque.Attachment0 = centerAttachment
+	steeringTorque.RelativeTo = Enum.ActuatorRelativeTo.World
+	steeringTorque.Torque = Vector3.zero
+	steeringTorque.Parent = chassis
+
+	local cameraAttachment = Instance.new("Attachment")
+	cameraAttachment.Name = "CameraAttachment"
+	cameraAttachment.Position = config.CameraOffset
+	cameraAttachment.Parent = chassis
+
+	local turretMuzzle = Instance.new("Attachment")
+	turretMuzzle.Name = "TurretMuzzleAttachment"
+	turretMuzzle.Position = config.TurretMuzzle
+	turretMuzzle.Parent = chassis
+
+	local forwardMuzzle = Instance.new("Attachment")
+	forwardMuzzle.Name = "ForwardMuzzleAttachment"
+	forwardMuzzle.Position = config.ForwardMuzzle
+	forwardMuzzle.Parent = chassis
+
+	if not mountStoreTurret(vehicle, chassis, config.TurretPosition) then
+		mountFallbackTurret(vehicle, chassis, config.TurretPosition)
+	end
+
+	for _, descendant in vehicle:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant:SetAttribute("HitRegion", "Hull")
+		end
+	end
+	personnelHitbox:SetAttribute("HitRegion", "Personnel")
+
+	vehicle:PivotTo(spawnCFrame)
+	vehicle.Parent = parent
+	CollectionService:AddTag(vehicle, "HoonangaVehicle")
+	chassis.Anchored = false
+	return vehicle
+end
+
+function VehicleBuilder.CreateRoadtrain(
+	parent: Instance,
+	name: string,
+	spawnCFrame: CFrame,
+	bodyColor: Color3
+): Model
+	return createGrayboxVehicle("Roadtrain", parent, name, spawnCFrame, bodyColor)
+end
+
+function VehicleBuilder.CreateBike(
+	parent: Instance,
+	name: string,
+	spawnCFrame: CFrame,
+	bodyColor: Color3
+): Model
+	return createGrayboxVehicle("Bike", parent, name, spawnCFrame, bodyColor)
+end
+
+function VehicleBuilder.Create(
+	vehicleType: string,
+	parent: Instance,
+	name: string,
+	spawnCFrame: CFrame,
+	bodyColor: Color3
+): Model
+	if vehicleType == "Ute" then
+		return VehicleBuilder.CreateUte(parent, name, spawnCFrame, bodyColor)
+	elseif vehicleType == "Roadtrain" then
+		return VehicleBuilder.CreateRoadtrain(parent, name, spawnCFrame, bodyColor)
+	elseif vehicleType == "Bike" then
+		return VehicleBuilder.CreateBike(parent, name, spawnCFrame, bodyColor)
+	end
+	error(string.format("Unknown vehicle type %q", vehicleType), 2)
 end
 
 return VehicleBuilder

@@ -72,6 +72,25 @@ scripts/run_studio_test.sh default.project.json scripts/studio_smoke_test.luau s
 | `scripts/road_seed_test.luau` | `seed` | `^\[SEED\] PASS:` |
 | `scripts/concurrent_vehicle_test.luau` | `concurrent` | `^\[CONCURRENT\] PASS:` |
 | `scripts/sky_test.luau` | `sky` | `^\[SKY\] PASS:` |
+| `scripts/convoy_composition_test.luau` | `convoy-composition` | `^M4_CONVOY_COMPOSITION_OK$` |
+| `scripts/control_transfer_test.luau` | `control-transfer` | `^M4_CONTROL_TRANSFER_OK$` |
+| `scripts/shared_fuel_test.luau` | `shared-fuel` | `^M4_SHARED_FUEL_OK$` |
+| `scripts/companion_formation_test.luau` | `companion-formation` | `^M4_COMPANION_FORMATION_OK$` |
+| `scripts/companion_combat_test.luau` | `companion-combat` | `^M4_COMPANION_COMBAT_OK$` |
+| `scripts/convoy_failure_test.luau` | `convoy-failure` | `^M4_CONVOY_FAILURE_OK$` |
+| `scripts/convoy_seed_balance_test.luau` | `convoy-balance` | `^M4_CONVOY_BALANCE_OK$` |
+| `scripts/convoy_stress_test.luau` | `convoy-stress` | `^M4_CONVOY_STRESS_OK$` |
+
+### Milestone 4 test controls
+
+The current pre-garage selector is intentionally small:
+
+- `F1`: one roadtrain
+- `F2`: two utes
+- `F3`: three bikes
+
+Selecting a class starts a fresh run. Control transfers automatically after
+vehicle or operator loss; voluntary mid-convoy transfer is still deferred.
 
 See [the game design document](docs/GAME_DESIGN_DOCUMENT.md) for the agreed scope and milestone plan.
 

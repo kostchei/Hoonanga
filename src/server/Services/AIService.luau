@@ -1,6 +1,7 @@
 --!strict
 
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -9,12 +10,14 @@ local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 local RoadService = require(script.Parent.RoadService)
-local VehicleBuilder = require(script.Parent.VehicleBuilder)
+local CombatService = require(script.Parent.CombatService)
+local ConvoyService = require(script.Parent.ConvoyService)
 local VehicleService = require(script.Parent.VehicleService)
 local WeaponService = require(script.Parent.WeaponService)
 
 local enemyVehicle: Model? = nil
 local lastFireAttempt = 0
+local companionLastFire: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 -- How often the AI *decides* to shoot, not how fast it shoots: WeaponService
 -- still enforces each weapon's own fire interval on top of this. Deliberately
 -- slower than the machine gun's 0.1s so the enemy reads as an opponent
@@ -161,6 +164,9 @@ local function updateEnemy(deltaTime: number)
 	local target = targetVehicle()
 	local now = Workspace:GetServerTimeNow()
 	local steer, throttle = calculateDriving(chassis, target, now)
+	vehicle:SetAttribute("ServerThrottle", throttle)
+	vehicle:SetAttribute("ServerSteer", steer)
+	vehicle:SetAttribute("ServerHandbrake", false)
 	VehiclePhysics.Step(vehicle, {
 		Throttle = throttle,
 		Steer = steer,
@@ -184,32 +190,196 @@ local function updateEnemy(deltaTime: number)
 	end
 end
 
+local function findCompanionTarget(vehicle: Model): Model?
+	local chassis = vehicle.PrimaryPart
+	if not chassis then
+		return nil
+	end
+	local best: Model? = nil
+	local bestScore = -math.huge
+	for _, candidate in CollectionService:GetTagged("HoonangaVehicle") do
+		if
+			not candidate:IsA("Model")
+			or not candidate.PrimaryPart
+			or candidate:GetAttribute("Destroyed")
+			or candidate:GetAttribute("Operational") == false
+			or not CombatService.IsHostile(vehicle, candidate)
+		then
+			continue
+		end
+		local offset = candidate.PrimaryPart.Position - chassis.Position
+		local distance = offset.Magnitude
+		if distance > 280 or distance < 0.1 then
+			continue
+		end
+		local aim = chassis.CFrame.LookVector:Dot(offset.Unit)
+		local hull = candidate:GetAttribute("Hull")
+		local maxHull = candidate:GetAttribute("MaxHull")
+		local vulnerability = if typeof(hull) == "number"
+				and typeof(maxHull) == "number"
+				and maxHull > 0
+			then 1 - hull / maxHull
+			else 0
+		local score = -distance + aim * 70 + vulnerability * 25
+		if score > bestScore then
+			bestScore = score
+			best = candidate
+		end
+	end
+	return best
+end
+
+local function obstacleAdjustment(
+	vehicle: Model,
+	_record: ConvoyService.ConvoyRecord
+): (number, number)
+	local chassis = vehicle.PrimaryPart
+	if not chassis then
+		return 0, 1
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { vehicle }
+	local result = Workspace:Raycast(
+		chassis.Position + chassis.CFrame.UpVector * 1.5,
+		chassis.CFrame.LookVector * 34,
+		params
+	)
+	if not result then
+		return 0, 1
+	end
+	local localHit = chassis.CFrame:PointToObjectSpace(result.Position)
+	return if localHit.X >= 0 then -0.75 else 0.75, 0.35
+end
+
+local function updateCompanion(
+	record: ConvoyService.ConvoyRecord,
+	vehicle: Model,
+	leader: Model,
+	deltaTime: number,
+	now: number
+)
+	local chassis = vehicle.PrimaryPart
+	local leaderChassis = leader.PrimaryPart
+	if not chassis or not leaderChassis then
+		return
+	end
+	local leaderLocation = RoadService.LocateOnPath(leaderChassis.Position)
+	local followerLocation = RoadService.LocateOnPath(chassis.Position)
+	if not leaderLocation or not followerLocation then
+		return
+	end
+	local lateral = vehicle:GetAttribute("FormationLateral")
+	local behind = vehicle:GetAttribute("FormationBehind")
+	lateral = if typeof(lateral) == "number" then lateral else 0
+	behind = if typeof(behind) == "number" then behind else 20
+	local halfWidth = leaderLocation.Record.Model:GetAttribute("FormationHalfWidth")
+	if typeof(halfWidth) == "number" then
+		lateral = math.clamp(lateral, -halfWidth, halfWidth)
+	end
+	local targetDistance = math.max(0, leaderLocation.Distance - behind)
+	local target = RoadService.GetPathTarget(targetDistance, lateral)
+	if not target then
+		return
+	end
+	local distanceToTarget = (target - chassis.Position).Magnitude
+	local pathLag = targetDistance - followerLocation.Distance
+	local steer = steerToward(chassis, target, lateral)
+	local obstacleSteer, obstacleThrottle = obstacleAdjustment(vehicle, record)
+	steer = math.clamp(steer + obstacleSteer, -1, 1)
+	local throttle = if distanceToTarget < 9
+		then 0.1
+		elseif pathLag > 100 then 1
+		elseif pathLag < -15 then 0.25
+		else 0.72
+	throttle *= obstacleThrottle
+	vehicle:SetAttribute("MaxSpeedScale", if pathLag > 120 then 1.1 else 1)
+	vehicle:SetAttribute("CatchUpActive", pathLag > 120)
+	vehicle:SetAttribute("ServerThrottle", throttle)
+	vehicle:SetAttribute("ServerSteer", steer)
+	vehicle:SetAttribute("ServerHandbrake", false)
+	VehiclePhysics.Step(vehicle, {
+		Throttle = throttle,
+		Steer = steer,
+		Handbrake = false,
+	}, deltaTime)
+
+	-- Do not let combat override a close obstacle or narrow-section correction.
+	if obstacleThrottle < 1 then
+		return
+	end
+	local combatTarget = findCompanionTarget(vehicle)
+	if not combatTarget or not combatTarget.PrimaryPart then
+		return
+	end
+	local lastAttempt = companionLastFire[vehicle] or 0
+	if now - lastAttempt < 0.38 then
+		return
+	end
+	companionLastFire[vehicle] = now
+	local distance = (combatTarget.PrimaryPart.Position - chassis.Position).Magnitude
+	WeaponService.SelectWeapon(vehicle, chooseWeapon(vehicle, distance))
+	local aimError = Vector3.new(
+		math.noise(now * 0.6, vehicle:GetAttribute("FormationSlot") or 0) * 9,
+		math.noise(now * 0.7 + 11) * 5,
+		0
+	)
+	local prediction = combatTarget.PrimaryPart.Position
+		+ combatTarget.PrimaryPart.AssemblyLinearVelocity * 0.1
+	local muzzle = chassis:FindFirstChild("TurretMuzzleAttachment")
+	if muzzle and muzzle:IsA("Attachment") then
+		WeaponService.TryFire(vehicle, prediction + aimError - muzzle.WorldPosition)
+	end
+end
+
+local function updateCompanions(deltaTime: number)
+	local now = Workspace:GetServerTimeNow()
+	for _, record in ConvoyService.GetAll() do
+		if record.Ended or record.Faction ~= "Player" then
+			continue
+		end
+		local leader = record.ControlledVehicle
+		if not leader or not ConvoyService.IsOperational(leader) then
+			continue
+		end
+		for _, vehicle in record.Members do
+			if vehicle ~= leader and ConvoyService.IsOperational(vehicle) then
+				updateCompanion(record, vehicle, leader, deltaTime, now)
+			end
+		end
+	end
+end
+
 local AIService = {}
+
+function AIService.StepCompanionsForTest(deltaTime: number)
+	updateCompanions(deltaTime)
+end
+
+function AIService.FindCompanionTargetForTest(vehicle: Model): Model?
+	return findCompanionTarget(vehicle)
+end
 
 function AIService.Start()
 	if not WorldConfig.Testing.EnemyEnabled then
 		print("[Hoonanga] Enemy ute disabled for initial driving test")
-		return
+	else
+		local enemyConvoy =
+			ConvoyService.CreateSingleNPC("Enemy", "Ute", "EnemyUte_01", WorldConfig.Spawn.Enemy)
+		enemyVehicle = enemyConvoy.Members[1]
+		enemyVehicle:SetAttribute("DamageMultiplier", 0.2)
+		enemyVehicle:SetAttribute("MaxSpeedScale", AI_MAX_SPEED_SCALE)
+
+		local chassis = enemyVehicle.PrimaryPart
+		if chassis and chassis:CanSetNetworkOwnership() then
+			chassis:SetNetworkOwner(nil)
+		end
 	end
 
-	local vehiclesFolder = Workspace:WaitForChild("HoonangaWorld"):WaitForChild("Vehicles")
-	enemyVehicle = VehicleBuilder.CreateUte(
-		vehiclesFolder,
-		"EnemyUte_01",
-		WorldConfig.Spawn.Enemy,
-		Color3.fromRGB(58, 91, 122)
-	)
-	enemyVehicle:SetAttribute("OwnerUserId", 0)
-	enemyVehicle:SetAttribute("Team", "Enemy")
-	enemyVehicle:SetAttribute("DamageMultiplier", 0.2)
-	enemyVehicle:SetAttribute("MaxSpeedScale", AI_MAX_SPEED_SCALE)
-
-	local chassis = enemyVehicle.PrimaryPart
-	if chassis and chassis:CanSetNetworkOwnership() then
-		chassis:SetNetworkOwner(nil)
-	end
-
-	RunService.PreSimulation:Connect(updateEnemy)
+	RunService.PreSimulation:Connect(function(deltaTime)
+		updateEnemy(deltaTime)
+		updateCompanions(deltaTime)
+	end)
 end
 
 return AIService

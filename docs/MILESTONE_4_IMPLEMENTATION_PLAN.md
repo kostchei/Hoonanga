@@ -1,9 +1,47 @@
 # Milestone 4: Convoys — Implementation Plan
 
-**Status:** Proposed  
+**Status:** Implemented — automated validation complete
 **Milestone:** 4 — Convoys  
 **Source of truth:** `docs/GAME_DESIGN_DOCUMENT.md`  
 **Exit condition:** Each convoy composition can complete the same seeded run through a distinct but viable playstyle.
+
+## Implementation record
+
+Milestone 4 was implemented against baseline commit `838b2c2`. The runtime now
+uses a server-owned convoy record as the unit of ownership, fuel, run progress,
+control transfer, and final elimination.
+
+| Checkpoint | Result | Automated evidence |
+|---|---|---|
+| 0 — Integration boundary | Complete | All Milestone 1–3 Studio regressions pass; pinned direct tool binaries execute |
+| 1 — Convoy model | Complete | `convoy_composition_test`, `control_transfer_test` |
+| 2 — Vehicle classes | Complete | `convoy_composition_test`, `convoy_seed_balance_test` |
+| 3 — Control transfer | Complete | `control_transfer_test`, end-to-end smoke test |
+| 4 — Operator loss | Complete | `control_transfer_test`, end-to-end smoke test |
+| 5 — Formation AI | Complete | `companion_formation_test`, road coverage/curve/recycle tests |
+| 6 — Companion combat | Complete | `companion_combat_test`, combat regression test |
+| 7 — Shared resources | Complete | `shared_fuel_test`, `convoy_failure_test` |
+| 8 — Cross-system lifecycle | Complete | combat, recycle, transfer, and failure gates |
+| 9 — Client feedback | Complete | explicit controlled-vehicle lookup, convoy HUD, transfer feedback, class selector |
+| 10 — Balance validation | Complete (automated baseline) | fixed seed `4404`, fuel-duration class gate, twelve-vehicle stress gate |
+
+The automated suite covers all three compositions, same- and cross-convoy
+hostility, partial and final loss, operator loss with intact hull, shared fuel,
+zero-fuel recovery, deterministic repair routing, formation outputs on the
+curved road path, validated companion ammunition use, and twelve simultaneous
+vehicles. A subjective first-person camera/handling playtest remains advisable
+before release, but it is not an unimplemented code checkpoint.
+
+### Delivered defaults
+
+- Class selection: `F1` roadtrain, `F2` two utes, `F3` three bikes.
+- Automatic transfer only; voluntary transfer remains deferred.
+- Shared convoy fuel; per-vehicle hull, operator, weapons, and ammunition.
+- Roadtrain: highest durability and ram authority, lowest speed, protected operator.
+- Utes: balanced two-member redundancy.
+- Bikes: fastest three-member composition, lowest durability and exposed riders.
+- Shared-fuel full-demand baselines are held to approximately four to six minutes.
+- Wrecks remain briefly as physical scenery and are removed on a bounded timer.
 
 ---
 

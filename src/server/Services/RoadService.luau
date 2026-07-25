@@ -1,11 +1,13 @@
 --!strict
 
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
+local ConvoyService = require(script.Parent.ConvoyService)
 
 -- Frames are world-space CFrames sampled along the chunk's centre line, with
 -- Distances holding the arc length of each one from the very start of the
@@ -81,8 +83,8 @@ end
 -- nothing stopped it being picked again one short run later, which in
 -- practice produced stretches that were nearly 40% elevated deck.
 -- Difficulty/MinSpeed/MaxActiveEnemies/AllowsFork are the per-family half of
--- GDD 8.2's chunk metadata. Nothing consumes them for gameplay yet - the
--- encounter director that will read MaxActiveEnemies is Milestone 4 - but
+-- GDD 8.2's chunk metadata. Formation AI consumes road capacity today; a
+-- future encounter director will also read MaxActiveEnemies. The attributes
 -- they are published on every chunk now so that director has something to
 -- read, and so a chunk can be inspected in the explorer and understood.
 local ROAD_FAMILY_WEIGHTS = {
@@ -1182,6 +1184,12 @@ local function configureChunk(chunk: Model, index: number): ChunkRecord
 	chunk:SetAttribute("MaxActiveEnemies", if familyInfo then familyInfo.MaxActiveEnemies else 2)
 	chunk:SetAttribute("AllowsFork", if familyInfo then familyInfo.AllowsFork else true)
 	chunk:SetAttribute("Weight", if familyInfo then familyInfo.Weight else 0)
+	local formationHalfWidth = if family == "Canyon"
+		then 9
+		elseif family == "Highway" or family == "Fork" then 12
+		elseif family == "Mudflat" then 14
+		else 18
+	chunk:SetAttribute("FormationHalfWidth", formationHalfWidth)
 
 	addSockets(chunk)
 
@@ -1303,6 +1311,36 @@ function RoadService.GetLaneTarget(position: Vector3, lookAhead: number): Vector
 	return (last.ExitCFrame * CFrame.new(last.LaneX, 0, -lookAhead)).Position
 end
 
+-- Resolves an absolute path distance and lateral formation offset. Formation
+-- followers use this instead of chasing a world-space point behind the
+-- leader, so they take the same curved spine and chosen fork.
+function RoadService.GetPathTarget(distance: number, lateral: number): Vector3?
+	local first = chunks[1]
+	if first and distance <= first.Distances[1] then
+		return (first.Frames[1] * CFrame.new(first.LaneX + lateral, 0, 0)).Position
+	end
+	for _, record in chunks do
+		local distances = record.Distances
+		if distance < distances[1] or distance > distances[#distances] then
+			continue
+		end
+		for sample = 1, #distances - 1 do
+			if distance <= distances[sample + 1] then
+				local span = distances[sample + 1] - distances[sample]
+				local alpha = if span > 0 then (distance - distances[sample]) / span else 0
+				local frame = record.Frames[sample]:Lerp(record.Frames[sample + 1], alpha)
+				return (frame * CFrame.new(record.LaneX + lateral, 0, 0)).Position
+			end
+		end
+	end
+	local last = chunks[#chunks]
+	if not last then
+		return nil
+	end
+	local beyond = math.max(0, distance - last.Distances[#last.Distances])
+	return (last.ExitCFrame * CFrame.new(last.LaneX + lateral, 0, -beyond)).Position
+end
+
 function RoadService.GetChunkAt(position: Vector3): Model?
 	local location = RoadService.LocateOnPath(position)
 	return if location then location.Record.Model else nil
@@ -1322,6 +1360,7 @@ local function countOccupancy(): ({ [number]: number }, number?)
 			not vehicle:IsA("Model")
 			or not vehicle.PrimaryPart
 			or vehicle:GetAttribute("Destroyed")
+			or vehicle:GetAttribute("Operational") == false
 		then
 			continue
 		end
@@ -1333,7 +1372,20 @@ local function countOccupancy(): ({ [number]: number }, number?)
 
 		occupancy[location.Record.Index] = (occupancy[location.Record.Index] or 0) + 1
 		vehicle:SetAttribute("RunDistance", location.Distance)
-		if vehicle:GetAttribute("Team") == "Player" then
+		local convoy = ConvoyService.GetByVehicle(vehicle)
+		if convoy then
+			ConvoyService.SetRunDistance(convoy, location.Distance)
+			local owner = if convoy.OwnerUserId > 0
+				then Players:GetPlayerByUserId(convoy.OwnerUserId)
+				else nil
+			if owner then
+				owner:SetAttribute("RunDistance", convoy.RunDistance)
+			end
+		end
+		if
+			vehicle:GetAttribute("Faction") == "Player"
+			or vehicle:GetAttribute("Team") == "Player"
+		then
 			slowestPlayer = if slowestPlayer
 				then math.min(slowestPlayer, location.Distance)
 				else location.Distance

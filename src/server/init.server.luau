@@ -2,6 +2,7 @@
 
 local AIService = require(script.Services.AIService)
 local CollisionDamageService = require(script.Services.CollisionDamageService)
+local ConvoyService = require(script.Services.ConvoyService)
 local FireService = require(script.Services.FireService)
 local FuelService = require(script.Services.FuelService)
 local PickupService = require(script.Services.PickupService)
@@ -13,6 +14,7 @@ local WeaponService = require(script.Services.WeaponService)
 
 RemoteService.Start()
 RoadService.Start()
+ConvoyService.Start()
 VehicleService.Start()
 PickupService.Start()
 FuelService.Start()

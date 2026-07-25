@@ -17,6 +17,7 @@ local Workspace = game:GetService("Workspace")
 
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
+local ConvoyService = require(script.Parent.ConvoyService)
 
 local CombatService = {}
 
@@ -63,6 +64,11 @@ function CombatService.IsHostile(source: Model?, target: Model): boolean
 	if source == target then
 		return false
 	end
+	local sourceConvoy = source:GetAttribute("ConvoyId")
+	local targetConvoy = target:GetAttribute("ConvoyId")
+	if typeof(sourceConvoy) == "string" and typeof(targetConvoy) == "string" then
+		return sourceConvoy ~= targetConvoy
+	end
 	return source:GetAttribute("Team") ~= target:GetAttribute("Team")
 end
 
@@ -70,7 +76,7 @@ local function awardKill(sourceVehicle: Model?, targetVehicle: Model)
 	if not sourceVehicle or sourceVehicle == targetVehicle then
 		return
 	end
-	if sourceVehicle:GetAttribute("Team") == targetVehicle:GetAttribute("Team") then
+	if not CombatService.IsHostile(sourceVehicle, targetVehicle) then
 		return
 	end
 
@@ -100,17 +106,12 @@ local function awardKill(sourceVehicle: Model?, targetVehicle: Model)
 	)
 end
 
--- Shared by both run-ending paths: a violent kill (destroyVehicle) and a
--- non-violent one (strandVehicle, for running out of fuel - GDD 4.2 lists
--- "elimination, fuel loss, or voluntary extraction" as distinct ways a run
--- ends, not fuel loss folded into elimination). Both need the same
--- Destroyed flag, character-respawn trigger, and eventual cleanup; only the
--- combat one adds hull loss, an explosion, and scorch marks.
-local function endRun(vehicle: Model): boolean
+local function endStandaloneRun(vehicle: Model): boolean
 	if vehicle:GetAttribute("Destroyed") then
 		return false
 	end
 	vehicle:SetAttribute("Destroyed", true)
+	vehicle:SetAttribute("Operational", false)
 	VehiclePhysics.Reset(vehicle)
 
 	local seat = vehicle:FindFirstChild("DriverSeat")
@@ -132,13 +133,25 @@ local function endRun(vehicle: Model): boolean
 end
 
 local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
-	if not endRun(vehicle) then
+	if vehicle:GetAttribute("Destroyed") then
 		return
 	end
-
+	local convoy = ConvoyService.GetByVehicle(vehicle)
+	if convoy then
+		vehicle:SetAttribute("Destroyed", true)
+		VehiclePhysics.Reset(vehicle)
+	else
+		if not endStandaloneRun(vehicle) then
+			return
+		end
+	end
 	vehicle:SetAttribute("Hull", 0)
 	warn(string.format("[Hoonanga] Destroying %s", vehicle.Name))
 	awardKill(sourceVehicle, vehicle)
+	if convoy then
+		ConvoyService.MarkMemberLost(vehicle, "VehicleDestroyed")
+		Debris:AddItem(vehicle, 20)
+	end
 
 	local chassis = vehicle.PrimaryPart
 	if chassis then
@@ -161,8 +174,17 @@ local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
 end
 
 local function strandVehicle(vehicle: Model)
-	if not endRun(vehicle) then
-		return
+	local convoy = ConvoyService.GetByVehicle(vehicle)
+	if convoy then
+		for _, member in convoy.Members do
+			member:SetAttribute("OutOfFuel", true)
+			VehiclePhysics.Reset(member)
+		end
+		ConvoyService.End(convoy, "OutOfFuel")
+	else
+		if not endStandaloneRun(vehicle) then
+			return
+		end
 	end
 	warn(string.format("[Hoonanga] %s ran out of fuel and was stranded", vehicle.Name))
 end
@@ -179,21 +201,29 @@ local function applyHullDamage(vehicle: Model, damage: number, sourceVehicle: Mo
 	end
 end
 
--- Personnel health is tracked on the vehicle rather than a real Humanoid:
--- the AI enemy has no character at all, and the player's own character is
--- welded into the seat with CanQuery disabled, so neither can be hit
--- directly by a raycast. There is no convoy/control-transfer system to hand
--- off to yet (that is Milestone 4), so per GDD 11.6 a killed operator
--- eliminates the single-vehicle "convoy" the same way hull loss does.
 local function applyOperatorDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
 	if vehicle:GetAttribute("Destroyed") then
+		return
+	end
+	if vehicle:GetAttribute("PersonnelProtected") == true then
 		return
 	end
 
 	local operatorHealth = math.max(0, requireNumber(vehicle, "OperatorHealth") - damage)
 	vehicle:SetAttribute("OperatorHealth", operatorHealth)
 	if operatorHealth <= 0 then
-		destroyVehicle(vehicle, sourceVehicle)
+		vehicle:SetAttribute("OperatorAlive", false)
+		local convoy = ConvoyService.GetByVehicle(vehicle)
+		if convoy then
+			VehiclePhysics.Reset(vehicle)
+			if vehicle:GetAttribute("VehicleType") == "Bike" and vehicle.PrimaryPart then
+				vehicle.PrimaryPart.AssemblyAngularVelocity += Vector3.new(0, 0, 2.8)
+			end
+			ConvoyService.MarkMemberLost(vehicle, "OperatorLost")
+			Debris:AddItem(vehicle, 20)
+		else
+			destroyVehicle(vehicle, sourceVehicle)
+		end
 	end
 end
 
@@ -266,6 +296,9 @@ function CombatService.ApplyWeaponHit(
 	end
 
 	if hitRegion == "Personnel" then
+		if target:GetAttribute("PersonnelProtected") == true then
+			return 0
+		end
 		local damage = config.PersonnelDamage * damageMultiplier
 		CombatService.ApplyDamage(target, "Personnel", damage, sourceVehicle)
 		return damage

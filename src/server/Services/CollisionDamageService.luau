@@ -85,6 +85,21 @@ local function applyVehicleImpact(first: Model, second: Model)
 	local firstMass = math.max(1, firstChassis.AssemblyMass)
 	local secondMass = math.max(1, secondChassis.AssemblyMass)
 	local baseDamage = ((closingSpeed - VEHICLE_IMPACT_THRESHOLD) ^ 1.15) * 0.12
+	local firstConvoy = first:GetAttribute("ConvoyId")
+	local sameConvoy = typeof(firstConvoy) == "string"
+		and firstConvoy == second:GetAttribute("ConvoyId")
+	-- Catch-up help remains bounded and never grants collision immunity:
+	-- companions still trade damage, but a legitimate recovery sprint is less
+	-- likely to erase the convoy when it reaches formation.
+	if
+		sameConvoy
+		and (
+			first:GetAttribute("CatchUpActive") == true
+			or second:GetAttribute("CatchUpActive") == true
+		)
+	then
+		baseDamage *= 0.45
+	end
 	local damageToFirst = baseDamage * math.clamp(secondMass / firstMass, 0.55, 1.8)
 	local damageToSecond = baseDamage * math.clamp(firstMass / secondMass, 0.55, 1.8)
 

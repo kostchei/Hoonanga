@@ -2,109 +2,128 @@
 
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 
-local SurfaceProfiles = require(ReplicatedStorage.Shared.Config.SurfaceProfiles)
 local VehicleConfig = require(ReplicatedStorage.Shared.Config.VehicleConfig)
 local CombatService = require(script.Parent.CombatService)
+local ConvoyService = require(script.Parent.ConvoyService)
 
 local UPDATE_INTERVAL = 0.25
--- GDD 4.2 lists fuel loss as its own distinct way a run ends, separate from
--- elimination - without this, running dry just leaves the player coasting
--- to a stop forever with no resolution. The delay gives them a moment to
--- see the OUT OF FUEL warning and coast down rather than ending the run the
--- instant the tank reads zero while still moving at speed.
 local STRAND_SPEED_THRESHOLD = 3
 local STRAND_DELAY = 3
 
-local strandedTimers: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local strandedTimers: { [Folder]: number } = setmetatable({}, { __mode = "k" }) :: any
+local standaloneTimers: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 
-local function sampleFuelMultiplier(vehicle: Model): (string, number)
-	local chassis = vehicle.PrimaryPart
-	if not chassis then
-		return "Air", 1
+local function memberConsumption(vehicle: Model): number
+	local vehicleType = vehicle:GetAttribute("VehicleType") or "Ute"
+	local config = VehicleConfig[vehicleType]
+	if not config then
+		return 0
 	end
-
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { vehicle }
-	local result = Workspace:Raycast(chassis.Position, -chassis.CFrame.UpVector * 7, params)
-	if not result then
-		return "Air", 1
-	end
-
-	local profileName = result.Instance:GetAttribute("SurfaceProfile")
-	if typeof(profileName) ~= "string" or not SurfaceProfiles[profileName] then
-		profileName = "WornDirt"
-	end
-	return profileName, SurfaceProfiles[profileName].FuelUse
+	local serverThrottle = vehicle:GetAttribute("ServerThrottle")
+	local throttle = if typeof(serverThrottle) == "number" then math.abs(serverThrottle) else 0
+	local surfaceFuel = vehicle:GetAttribute("SurfaceFuelMultiplier")
+	local surfaceMultiplier = if typeof(surfaceFuel) == "number" then surfaceFuel else 1
+	local forwardSpeed = vehicle:GetAttribute("ForwardSpeed")
+	local loadMultiplier = if typeof(forwardSpeed) == "number"
+		then 1 + math.clamp(math.abs(forwardSpeed) / config.MaxForwardSpeed, 0, 1) * 0.08
+		else 1
+	return (config.IdleFuelPerSecond + throttle * config.ThrottleFuelPerSecond)
+		* config.FuelConsumptionMultiplier
+		* surfaceMultiplier
+		* loadMultiplier
 end
 
-local function updateStrandedTimer(vehicle: Model, outOfFuel: boolean, deltaTime: number)
-	if not outOfFuel then
-		strandedTimers[vehicle] = nil
+local function convoyStopped(record: ConvoyService.ConvoyRecord): boolean
+	for _, vehicle in ConvoyService.GetOperationalMembers(record) do
+		local chassis = vehicle.PrimaryPart
+		if chassis and chassis.AssemblyLinearVelocity.Magnitude > STRAND_SPEED_THRESHOLD then
+			return false
+		end
+	end
+	return true
+end
+
+local function updateConvoy(record: ConvoyService.ConvoyRecord, deltaTime: number)
+	if record.Ended then
+		strandedTimers[record.Model] = nil
 		return
 	end
-
-	local chassis = vehicle.PrimaryPart
-	local speed = if chassis then chassis.AssemblyLinearVelocity.Magnitude else 0
-	if speed > STRAND_SPEED_THRESHOLD then
-		strandedTimers[vehicle] = nil
+	local consumption = 0
+	for _, vehicle in ConvoyService.GetOperationalMembers(record) do
+		consumption += memberConsumption(vehicle)
+	end
+	ConvoyService.SetFuel(record, record.Fuel - consumption * deltaTime)
+	if record.Fuel > 0 then
+		strandedTimers[record.Model] = nil
 		return
 	end
-
-	local elapsed = (strandedTimers[vehicle] or 0) + deltaTime
-	strandedTimers[vehicle] = elapsed
+	if not convoyStopped(record) then
+		strandedTimers[record.Model] = nil
+		return
+	end
+	local elapsed = (strandedTimers[record.Model] or 0) + deltaTime
+	strandedTimers[record.Model] = elapsed
 	if elapsed >= STRAND_DELAY then
-		strandedTimers[vehicle] = nil
+		strandedTimers[record.Model] = nil
+		local member = record.Members[1]
+		if member then
+			CombatService.StrandVehicle(member)
+		else
+			ConvoyService.End(record, "OutOfFuel")
+		end
+	end
+end
+
+local function updateStandalone(vehicle: Model, deltaTime: number)
+	if
+		vehicle:GetAttribute("ConvoyId") ~= nil
+		or vehicle:GetAttribute("Destroyed")
+		or vehicle:GetAttribute("Team") ~= "Player"
+	then
+		return
+	end
+	local fuel = vehicle:GetAttribute("Fuel")
+	if typeof(fuel) ~= "number" then
+		return
+	end
+	fuel = math.max(0, fuel - memberConsumption(vehicle) * deltaTime)
+	vehicle:SetAttribute("Fuel", fuel)
+	vehicle:SetAttribute("OutOfFuel", fuel <= 0)
+	if fuel > 0 then
+		standaloneTimers[vehicle] = nil
+		return
+	end
+	local chassis = vehicle.PrimaryPart
+	if chassis and chassis.AssemblyLinearVelocity.Magnitude > STRAND_SPEED_THRESHOLD then
+		standaloneTimers[vehicle] = nil
+		return
+	end
+	local elapsed = (standaloneTimers[vehicle] or 0) + deltaTime
+	standaloneTimers[vehicle] = elapsed
+	if elapsed >= STRAND_DELAY then
+		standaloneTimers[vehicle] = nil
 		CombatService.StrandVehicle(vehicle)
 	end
 end
 
-local function updateVehicle(vehicle: Model, deltaTime: number)
-	if vehicle:GetAttribute("Destroyed") or vehicle:GetAttribute("Team") ~= "Player" then
-		return
-	end
-
-	local fuel = vehicle:GetAttribute("Fuel")
-	if typeof(fuel) ~= "number" or fuel <= 0 then
-		vehicle:SetAttribute("Fuel", 0)
-		vehicle:SetAttribute("OutOfFuel", true)
-		updateStrandedTimer(vehicle, true, deltaTime)
-		return
-	end
-
-	local vehicleType = vehicle:GetAttribute("VehicleType") or "Ute"
-	local config = VehicleConfig[vehicleType]
-	if not config then
-		return
-	end
-
-	local serverThrottle = vehicle:GetAttribute("ServerThrottle")
-	local throttle = if typeof(serverThrottle) == "number" then math.abs(serverThrottle) else 0
-	local surfaceName, fuelMultiplier = sampleFuelMultiplier(vehicle)
-	local consumption = (config.IdleFuelPerSecond + throttle * config.ThrottleFuelPerSecond)
-		* fuelMultiplier
-	fuel = math.max(0, fuel - consumption * deltaTime)
-
-	local outOfFuel = fuel <= 0
-	vehicle:SetAttribute("Fuel", fuel)
-	vehicle:SetAttribute("OutOfFuel", outOfFuel)
-	updateStrandedTimer(vehicle, outOfFuel, deltaTime)
-	vehicle:SetAttribute("ServerSurfaceProfile", surfaceName)
-	vehicle:SetAttribute("SurfaceFuelMultiplier", fuelMultiplier)
-end
-
 local FuelService = {}
+
+function FuelService.StepForTest(deltaTime: number)
+	for _, record in ConvoyService.GetAll() do
+		updateConvoy(record, deltaTime)
+	end
+	for _, vehicle in CollectionService:GetTagged("HoonangaVehicle") do
+		if vehicle:IsA("Model") then
+			updateStandalone(vehicle, deltaTime)
+		end
+	end
+end
 
 function FuelService.Start()
 	task.spawn(function()
 		while true do
-			for _, vehicle in CollectionService:GetTagged("HoonangaVehicle") do
-				if vehicle:IsA("Model") then
-					updateVehicle(vehicle, UPDATE_INTERVAL)
-				end
-			end
+			FuelService.StepForTest(UPDATE_INTERVAL)
 			task.wait(UPDATE_INTERVAL)
 		end
 	end)

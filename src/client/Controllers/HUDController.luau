@@ -52,6 +52,63 @@ local function currentVehicle(): Model?
 	return VehicleLocator.ForPlayer(localPlayer)
 end
 
+local function memberStatus(vehicle: Model): string
+	if vehicle:GetAttribute("Destroyed") then
+		return "DESTROYED"
+	elseif vehicle:GetAttribute("OperatorAlive") == false then
+		return "OPERATOR LOST"
+	elseif vehicle:GetAttribute("FireState") ~= "None" then
+		return "BURNING"
+	elseif vehicle:GetAttribute("Bogged") == true then
+		return "BOGGED"
+	end
+	local hull = vehicle:GetAttribute("Hull")
+	local maxHull = vehicle:GetAttribute("MaxHull")
+	if
+		typeof(hull) == "number"
+		and typeof(maxHull) == "number"
+		and maxHull > 0
+		and hull / maxHull < 0.55
+	then
+		return "DAMAGED"
+	end
+	return "HEALTHY"
+end
+
+local function convoySummary(vehicle: Model): string
+	local convoyId = vehicle:GetAttribute("ConvoyId")
+	local world = workspace:FindFirstChild("HoonangaWorld")
+	local vehicles = if world then world:FindFirstChild("Vehicles") else nil
+	if typeof(convoyId) ~= "string" or not vehicles then
+		return ""
+	end
+	local members = {}
+	for _, candidate in vehicles:GetChildren() do
+		if candidate:IsA("Model") and candidate:GetAttribute("ConvoyId") == convoyId then
+			table.insert(members, candidate)
+		end
+	end
+	table.sort(members, function(a, b)
+		return (a:GetAttribute("FormationSlot") or 99) < (b:GetAttribute("FormationSlot") or 99)
+	end)
+	local rows = {}
+	for _, member in members do
+		local marker = if member:GetAttribute("ControlledByUserId") == localPlayer.UserId
+			then ">"
+			else "-"
+		table.insert(
+			rows,
+			string.format(
+				"%s %s  %s",
+				marker,
+				string.upper(member:GetAttribute("VehicleType") or "VEHICLE"),
+				memberStatus(member)
+			)
+		)
+	end
+	return table.concat(rows, "\n")
+end
+
 local HUDController = {}
 
 function HUDController.Start()
@@ -79,6 +136,16 @@ function HUDController.Start()
 		Enum.TextXAlignment.Left
 	)
 	status.TextYAlignment = Enum.TextYAlignment.Top
+
+	local convoy = makeLabel(
+		gui,
+		"Convoy",
+		UDim2.new(0, 22, 1, -258),
+		UDim2.fromOffset(300, 84),
+		15,
+		Enum.TextXAlignment.Left
+	)
+	convoy.TextYAlignment = Enum.TextYAlignment.Top
 
 	local ammo = makeLabel(
 		gui,
@@ -108,17 +175,26 @@ function HUDController.Start()
 	)
 	warning.TextColor3 = Color3.fromRGB(255, 103, 65)
 	warning.Visible = false
+	local lastTransferSerial = localPlayer:GetAttribute("ControlTransferSerial") or 0
+	local transferMessageUntil = 0
 
 	RunService.RenderStepped:Connect(function()
 		local vehicle = currentVehicle()
 		local visible = vehicle ~= nil
 		status.Visible = visible
+		convoy.Visible = visible
 		ammo.Visible = visible
 		weapon.Visible = visible
 		crosshair.Visible = visible
 		if not vehicle or not vehicle.PrimaryPart then
-			warning.Visible = false
+			warning.Visible = os.clock() < transferMessageUntil
 			return
+		end
+		convoy.Text = convoySummary(vehicle)
+		local transferSerial = localPlayer:GetAttribute("ControlTransferSerial")
+		if typeof(transferSerial) == "number" and transferSerial ~= lastTransferSerial then
+			lastTransferSerial = transferSerial
+			transferMessageUntil = os.clock() + 1.6
 		end
 
 		local forwardSpeed = vehicle:GetAttribute("ForwardSpeed")
@@ -185,7 +261,10 @@ function HUDController.Start()
 		-- around, and burning is not.
 		local fireState = vehicle:GetAttribute("FireState")
 		local fireText = if typeof(fireState) == "string" then FIRE_STATE_TEXT[fireState] else nil
-		if fireText then
+		if os.clock() < transferMessageUntil then
+			warning.Visible = true
+			warning.Text = "CONTROL TRANSFER"
+		elseif fireText then
 			warning.Visible = true
 			warning.Text = fireText
 		elseif vehicle:GetAttribute("OutOfFuel") == true then
