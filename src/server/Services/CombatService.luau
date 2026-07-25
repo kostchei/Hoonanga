@@ -130,6 +130,17 @@ end
 
 local CombatService = {}
 
+function CombatService.ApplyHullDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
+	if damage <= 0 or damage ~= damage then
+		return
+	end
+	applyHullDamage(vehicle, damage, sourceVehicle)
+end
+
+function CombatService.DestroyVehicle(vehicle: Model, sourceVehicle: Model?)
+	destroyVehicle(vehicle, sourceVehicle)
+end
+
 local function fireRay(
 	vehicle: Model,
 	origin: Vector3,

@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
@@ -134,6 +135,15 @@ local function unbindVehicleActions()
 	vehicleInputRemote:FireServer(0, 0, false)
 end
 
+local function ownsVehiclePhysics(vehicle: Model): boolean
+	local chassis = vehicle.PrimaryPart
+	if not chassis or chassis.Anchored then
+		return false
+	end
+
+	return vehicle:GetAttribute("NetworkOwnerUserId") == localPlayer.UserId
+end
+
 local function refreshVehicle()
 	local previousVehicle = activeVehicle
 	activeVehicle = VehicleLocator.ForPlayer(localPlayer)
@@ -156,7 +166,7 @@ local VehicleController = {}
 function VehicleController.Start()
 	refreshVehicle()
 
-	RunService.Heartbeat:Connect(function()
+	RunService.PreSimulation:Connect(function(deltaTime)
 		local resolvedVehicle = VehicleLocator.ForPlayer(localPlayer)
 		if resolvedVehicle ~= activeVehicle then
 			refreshVehicle()
@@ -168,6 +178,14 @@ function VehicleController.Start()
 		end
 
 		local throttle, steer, handbrake = currentInput()
+		if not vehicle:GetAttribute("Destroyed") and ownsVehiclePhysics(vehicle) then
+			VehiclePhysics.Step(vehicle, {
+				Throttle = throttle,
+				Steer = steer,
+				Handbrake = handbrake,
+			}, deltaTime)
+		end
+
 		local now = os.clock()
 		if now - lastInputSentAt >= INPUT_SEND_INTERVAL then
 			lastInputSentAt = now

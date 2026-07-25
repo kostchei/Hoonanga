@@ -24,6 +24,7 @@ local VehicleService = require(services.VehicleService)
 local PickupService = require(services.PickupService)
 local FuelService = require(services.FuelService)
 local CombatService = require(services.CombatService)
+local CollisionDamageService = require(services.CollisionDamageService)
 local AIService = require(services.AIService)
 local VehicleBuilder = require(services.VehicleBuilder)
 
@@ -37,6 +38,7 @@ VehicleService.Start()
 PickupService.Start()
 FuelService.Start()
 CombatService.Start()
+CollisionDamageService.Start()
 AIService.Start()
 
 task.wait(1)
@@ -68,6 +70,14 @@ expect(vehicles ~= nil, "Vehicles folder is missing")
 local enemy = vehicles:FindFirstChild("EnemyUte_01")
 expect(enemy ~= nil, "AIService did not create the enemy ute")
 expect(enemy.PrimaryPart ~= nil, "enemy ute has no primary part")
+expect(not enemy.PrimaryPart.Anchored, "enemy chassis is still kinematic/anchored")
+expect(enemy.PrimaryPart.CanCollide, "enemy chassis has no physical collision body")
+for _, corner in { "FL", "FR", "RL", "RR" } do
+	expect(
+		enemy.PrimaryPart:FindFirstChild("SuspensionPoint" .. corner) ~= nil,
+		"enemy ute has no " .. corner .. " suspension raycast point"
+	)
+end
 expect(
 	enemy:GetAttribute("VisualAssetId") == 6418225759,
 	"enemy ute did not mount the audited pickup body"
@@ -115,6 +125,17 @@ for _, descendant in playerBody:GetDescendants() do
 	expect(not descendant:IsA("LuaSourceContainer"), "player body retained executable source")
 	expect(not descendant:IsA("VehicleSeat"), "player body retained its original chassis seat")
 end
+
+expect(playerVisualTest.PrimaryPart ~= nil, "player physics test ute has no chassis")
+local enemyHullBeforeImpact = enemy:GetAttribute("Hull")
+playerVisualTest.PrimaryPart.AssemblyLinearVelocity = Vector3.new(0, 0, -65)
+enemy.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+CollisionDamageService.ApplyVehicleImpactForTest(playerVisualTest, enemy)
+expect(
+	typeof(enemyHullBeforeImpact) == "number"
+		and (enemy:GetAttribute("Hull") :: number) < enemyHullBeforeImpact,
+	"ramming impact did not damage the enemy"
+)
 playerVisualTest:Destroy()
 
 expect(

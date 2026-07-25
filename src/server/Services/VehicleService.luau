@@ -6,11 +6,24 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
+local VehicleConfig = require(ReplicatedStorage.Shared.Config.VehicleConfig)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 local RemoteService = require(script.Parent.RemoteService)
 local VehicleBuilder = require(script.Parent.VehicleBuilder)
 
+type ValidationState = {
+	Position: Vector3,
+	CheckedAt: number,
+}
+
+local VALIDATION_INTERVAL = 0.25
+local VALIDATION_SPEED_MULTIPLIER = 1.5
+local VALIDATION_DISTANCE_TOLERANCE = 10
+local VALIDATION_VERTICAL_TOLERANCE = 45
+local IMPACT_GRACE_WINDOW = 0.5
+
 local playerVehicles: { [Player]: Model } = {}
+local validationStates: { [Player]: ValidationState } = {}
 
 local function setNetworkOwner(vehicle: Model, player: Player?)
 	local chassis = vehicle.PrimaryPart
@@ -25,9 +38,27 @@ local function setNetworkOwner(vehicle: Model, player: Player?)
 
 	if player then
 		chassis:SetNetworkOwner(player)
+		-- Lets the client tell whether it owns physics without calling the
+		-- server/owner-only GetNetworkOwner API itself, which throws for
+		-- anyone else and was firing (and being caught) every single
+		-- PreSimulation frame during the replication window right after
+		-- ownership transfer.
+		vehicle:SetAttribute("NetworkOwnerUserId", player.UserId)
 	else
 		chassis:SetNetworkOwner(nil)
+		vehicle:SetAttribute("NetworkOwnerUserId", nil)
 	end
+end
+
+local function isClientOwned(chassis: BasePart, player: Player): boolean
+	if chassis.Anchored then
+		return false
+	end
+
+	local ok, owner = pcall(function()
+		return chassis:GetNetworkOwner()
+	end)
+	return ok and owner == player
 end
 
 local function bindSeat(vehicle: Model)
@@ -50,7 +81,7 @@ local function bindSeat(vehicle: Model)
 		local character = occupant.Parent
 		local player = if character then Players:GetPlayerFromCharacter(character) else nil
 		if player then
-			setNetworkOwner(vehicle, nil)
+			setNetworkOwner(vehicle, player)
 		end
 	end)
 end
@@ -68,8 +99,69 @@ local function createPlayerVehicle(player: Player): Model
 	vehicle:SetAttribute("OwnerUserId", player.UserId)
 	vehicle:SetAttribute("Team", "Player")
 	playerVehicles[player] = vehicle
+	if vehicle.PrimaryPart then
+		validationStates[player] = {
+			Position = vehicle.PrimaryPart.Position,
+			CheckedAt = Workspace:GetServerTimeNow(),
+		}
+	end
 	bindSeat(vehicle)
 	return vehicle
+end
+
+local function validatePlayerVehicle(player: Player, vehicle: Model, now: number)
+	local chassis = vehicle.PrimaryPart
+	if not chassis or vehicle:GetAttribute("Destroyed") then
+		return
+	end
+
+	local state = validationStates[player]
+	if not state then
+		validationStates[player] = {
+			Position = chassis.Position,
+			CheckedAt = now,
+		}
+		return
+	end
+
+	local deltaTime = now - state.CheckedAt
+	if deltaTime < VALIDATION_INTERVAL then
+		return
+	end
+
+	local delta = chassis.Position - state.Position
+	local horizontalDistance = Vector3.new(delta.X, 0, delta.Z).Magnitude
+	local vehicleType = vehicle:GetAttribute("VehicleType") or "Ute"
+	local config = VehicleConfig[vehicleType]
+	local maxSpeed = if config then config.MaxForwardSpeed else 112
+	local maximumDistance = maxSpeed * VALIDATION_SPEED_MULTIPLIER * deltaTime
+		+ VALIDATION_DISTANCE_TOLERANCE
+	local invalid = horizontalDistance > maximumDistance
+		or math.abs(delta.Y) > VALIDATION_VERTICAL_TOLERANCE
+
+	local lastImpactAt = vehicle:GetAttribute("LastImpactAt")
+	local withinImpactGrace = typeof(lastImpactAt) == "number"
+		and (now - lastImpactAt) < IMPACT_GRACE_WINDOW
+
+	if invalid and withinImpactGrace then
+		state.Position = chassis.Position
+	elseif invalid then
+		warn(
+			string.format(
+				"[Hoonanga] Corrected impossible movement from %s (%.1f studs in %.2fs)",
+				player.Name,
+				delta.Magnitude,
+				deltaTime
+			)
+		)
+		local rotation = chassis.CFrame.Rotation
+		vehicle:PivotTo(CFrame.new(state.Position) * rotation)
+		chassis.AssemblyLinearVelocity = Vector3.zero
+		chassis.AssemblyAngularVelocity = Vector3.zero
+	else
+		state.Position = chassis.Position
+	end
+	state.CheckedAt = now
 end
 
 local function bindPlayerToVehicle(player: Player, character: Model)
@@ -200,23 +292,44 @@ function VehicleService.Start()
 	Players.PlayerRemoving:Connect(function(player)
 		local vehicle = playerVehicles[player]
 		playerVehicles[player] = nil
+		validationStates[player] = nil
 		if vehicle then
 			vehicle:Destroy()
 		end
 	end)
 
-	RunService.Heartbeat:Connect(function(deltaTime)
-		for _, vehicle in playerVehicles do
-			if vehicle.Parent and not vehicle:GetAttribute("Destroyed") then
-				local throttle = vehicle:GetAttribute("ServerThrottle")
-				local steer = vehicle:GetAttribute("ServerSteer")
-				local handbrake = vehicle:GetAttribute("ServerHandbrake")
-				VehiclePhysics.Step(vehicle, {
-					Throttle = if typeof(throttle) == "number" then throttle else 0,
-					Steer = if typeof(steer) == "number" then steer else 0,
-					Handbrake = handbrake == true,
-				}, deltaTime)
+	RunService.Heartbeat:Connect(function(_deltaTime)
+		local now = Workspace:GetServerTimeNow()
+		for player, vehicle in playerVehicles do
+			if vehicle.Parent then
+				validatePlayerVehicle(player, vehicle, now)
 			end
+		end
+	end)
+
+	-- Drives the vehicle server-side whenever the owning client isn't (yet, or
+	-- no longer) network owner of the chassis, e.g. the window between spawn
+	-- and the client receiving physics ownership. Once ownership transfers to
+	-- the client, VehicleController steps it locally and this is a no-op.
+	RunService.PreSimulation:Connect(function(deltaTime)
+		for player, vehicle in playerVehicles do
+			if not vehicle.Parent or vehicle:GetAttribute("Destroyed") then
+				continue
+			end
+
+			local chassis = vehicle.PrimaryPart
+			if not chassis or isClientOwned(chassis, player) then
+				continue
+			end
+
+			local throttle = vehicle:GetAttribute("ServerThrottle")
+			local steer = vehicle:GetAttribute("ServerSteer")
+			local handbrake = vehicle:GetAttribute("ServerHandbrake")
+			VehiclePhysics.Step(vehicle, {
+				Throttle = if typeof(throttle) == "number" then throttle else 0,
+				Steer = if typeof(steer) == "number" then steer else 0,
+				Handbrake = handbrake == true,
+			}, deltaTime)
 		end
 	end)
 end

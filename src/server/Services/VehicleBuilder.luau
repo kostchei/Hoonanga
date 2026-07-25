@@ -59,13 +59,27 @@ local function addSuspension(chassis: Part, corner: string, offset: Vector3)
 	attachment.Position = offset
 	attachment.Parent = chassis
 
-	local force = Instance.new("VectorForce")
-	force.Name = "Suspension" .. corner
-	force.Attachment0 = attachment
-	force.ApplyAtCenterOfMass = false
-	force.RelativeTo = Enum.ActuatorRelativeTo.World
-	force.Force = Vector3.zero
-	force.Parent = chassis
+	local springForce = Instance.new("VectorForce")
+	springForce.Name = "Suspension" .. corner
+	springForce.Attachment0 = attachment
+	springForce.ApplyAtCenterOfMass = false
+	springForce.RelativeTo = Enum.ActuatorRelativeTo.World
+	springForce.Force = Vector3.zero
+	springForce.Parent = chassis
+
+	-- Per-wheel lateral grip. Front and rear corners get different amounts
+	-- of steer angle applied in VehiclePhysics, so the differential grip
+	-- between them is what turns the vehicle and keeps it upright - no
+	-- separate yaw-torque or self-level constraint is needed, and none is
+	-- present here on purpose (see VehiclePhysics.luau for why one used to
+	-- be here and caused the vehicle to jitter).
+	local lateralForce = Instance.new("VectorForce")
+	lateralForce.Name = "LateralGrip" .. corner
+	lateralForce.Attachment0 = attachment
+	lateralForce.ApplyAtCenterOfMass = false
+	lateralForce.RelativeTo = Enum.ActuatorRelativeTo.World
+	lateralForce.Force = Vector3.zero
+	lateralForce.Parent = chassis
 end
 
 local function sanitizePickupBody(body: Model)
@@ -407,24 +421,17 @@ function VehicleBuilder.CreateUte(
 	driveForce.Force = Vector3.zero
 	driveForce.Parent = chassis
 
-	local steeringVelocity = Instance.new("AngularVelocity")
-	steeringVelocity.Name = "SteeringVelocity"
-	steeringVelocity.Attachment0 = centerAttachment
-	steeringVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	steeringVelocity.MaxTorque = math.huge
-	steeringVelocity.AngularVelocity = Vector3.zero
-	steeringVelocity.Parent = chassis
-
-	local uprightOrientation = Instance.new("AlignOrientation")
-	uprightOrientation.Name = "UprightOrientation"
-	uprightOrientation.Attachment0 = centerAttachment
-	uprightOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	uprightOrientation.MaxAngularVelocity = math.rad(180)
-	uprightOrientation.MaxTorque = 2_000_000
-	uprightOrientation.Responsiveness = 18
-	uprightOrientation.RigidityEnabled = false
-	uprightOrientation.CFrame = spawnCFrame.Rotation
-	uprightOrientation.Parent = chassis
+	-- Yaw-only torque assist for low-speed responsiveness (real tire slip is
+	-- too weak to turn the car when it's barely moving, which is why an
+	-- arcade driving feel needs a direct nudge here). This does not touch
+	-- roll or pitch, so it does not compete with the per-corner suspension
+	-- the way the old AlignOrientation self-level constraint did.
+	local steeringTorque = Instance.new("Torque")
+	steeringTorque.Name = "SteeringTorque"
+	steeringTorque.Attachment0 = centerAttachment
+	steeringTorque.RelativeTo = Enum.ActuatorRelativeTo.World
+	steeringTorque.Torque = Vector3.zero
+	steeringTorque.Parent = chassis
 
 	local cameraAttachment = Instance.new("Attachment")
 	cameraAttachment.Name = "CameraAttachment"
@@ -457,6 +464,7 @@ function VehicleBuilder.CreateUte(
 	vehicle:PivotTo(spawnCFrame)
 	vehicle.Parent = parent
 	CollectionService:AddTag(vehicle, "HoonangaVehicle")
+	chassis.Anchored = false
 
 	return vehicle
 end

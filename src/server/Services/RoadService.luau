@@ -251,6 +251,7 @@ function RoadService.Start()
 	killPlane.Position = Vector3.new(0, -120, -49000)
 	killPlane:SetAttribute("Lethal", true)
 	killPlane.Parent = world
+	CollectionService:AddTag(killPlane, "RoadLethalZone")
 
 	chunks = {}
 	nextChunkIndex = WorldConfig.Road.InitialChunkCount

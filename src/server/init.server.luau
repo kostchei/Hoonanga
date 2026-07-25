@@ -1,6 +1,7 @@
 --!strict
 
 local AIService = require(script.Services.AIService)
+local CollisionDamageService = require(script.Services.CollisionDamageService)
 local CombatService = require(script.Services.CombatService)
 local FuelService = require(script.Services.FuelService)
 local PickupService = require(script.Services.PickupService)
@@ -14,6 +15,7 @@ VehicleService.Start()
 PickupService.Start()
 FuelService.Start()
 CombatService.Start()
+CollisionDamageService.Start()
 AIService.Start()
 
 print("[Hoonanga] Server ready")

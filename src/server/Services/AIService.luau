@@ -97,7 +97,7 @@ function AIService.Start()
 		chassis:SetNetworkOwner(nil)
 	end
 
-	RunService.Heartbeat:Connect(updateEnemy)
+	RunService.PreSimulation:Connect(updateEnemy)
 end
 
 return AIService

@@ -14,6 +14,7 @@ export type VehicleConfig = {
 	ReverseAcceleration: number,
 	BrakeDeceleration: number,
 	CoastDeceleration: number,
+	MaxSteerAngle: number,
 	SteeringRate: number,
 	HighSpeedSteeringFactor: number,
 	LateralGrip: number,
@@ -32,6 +33,7 @@ local ute: VehicleConfig = {
 	ReverseAcceleration = 28,
 	BrakeDeceleration = 82,
 	CoastDeceleration = 12,
+	MaxSteerAngle = math.rad(38),
 	SteeringRate = math.rad(72),
 	HighSpeedSteeringFactor = 0.42,
 	LateralGrip = 7.5,
@@ -43,8 +45,8 @@ local ute: VehicleConfig = {
 	Suspension = {
 		RideHeight = 2.8,
 		RayLength = 4.5,
-		SpringStrength = 52,
-		SpringDamping = 8,
+		SpringStrength = 180,
+		SpringDamping = 14,
 	},
 }
 
