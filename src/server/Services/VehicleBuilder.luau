@@ -2,6 +2,9 @@
 
 local AssetService = game:GetService("AssetService")
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 
 local CHASSIS_SIZE = Vector3.new(6.4, 1.8, 15.4)
 local PICKUP_ASSET_ID = 6418225759
@@ -346,9 +349,24 @@ function VehicleBuilder.CreateUte(
 	vehicle:SetAttribute("Fuel", 300)
 	vehicle:SetAttribute("MaxFuel", 300)
 	vehicle:SetAttribute("OutOfFuel", false)
-	vehicle:SetAttribute("Ammo", 80)
-	vehicle:SetAttribute("ReserveAmmo", 240)
-	vehicle:SetAttribute("Reloading", false)
+	-- GDD 11.5 fire state. Heat is the accumulator FireService drives; every
+	-- vehicle carries it from birth so nothing has to test for its absence.
+	vehicle:SetAttribute("Heat", 0)
+	vehicle:SetAttribute("FireState", "None")
+	-- VehiclePhysics republishes this every step, but a vehicle can be set
+	-- alight (or shot, or rammed) before it has ever been stepped - on the
+	-- spawn frame, or while parked with no driver - and FireService reads it
+	-- to decide how much airflow is stripping the flames.
+	vehicle:SetAttribute("ForwardSpeed", 0)
+	vehicle:SetAttribute("DamageMultiplier", 1)
+	-- GDD 11.4 ram: equipment modifies impact damage dealt and received. The
+	-- base ute has no ram equipment, so both are neutral until a garage
+	-- fitting changes them.
+	vehicle:SetAttribute("RamDealtMultiplier", 1)
+	vehicle:SetAttribute("RamReceivedMultiplier", 1)
+	vehicle:SetAttribute("MuzzleBlocked", false)
+	vehicle:SetAttribute("AimOutOfTraverse", false)
+	WeaponState.Initialise(vehicle)
 	vehicle:SetAttribute("ServerThrottle", 0)
 	vehicle:SetAttribute("ServerSteer", 0)
 	vehicle:SetAttribute("ServerHandbrake", false)
@@ -423,11 +441,10 @@ function VehicleBuilder.CreateUte(
 	weldToChassis(chassis, seat, CFrame.new(seatOffset))
 	seat.Parent = vehicle
 
-	-- Milestone 1's personnel damage channel (GDD 11.1/11.2): an invisible,
-	-- non-physical hitbox standing in for the operator's torso, positioned
-	-- above the seat. CanQuery stays true (it's the only thing about this
-	-- part that matters) so weapon raycasts can single it out from the
-	-- surrounding hull.
+	-- The personnel damage channel (GDD 11.1/11.2): an invisible, non-physical
+	-- hitbox standing in for the operator's torso, positioned above the seat.
+	-- CanQuery stays true (it's the only thing about this part that matters)
+	-- so weapon raycasts can single it out from the surrounding hull.
 	local personnelHitbox = makePart(
 		"PersonnelHitbox",
 		Vector3.new(1.6, 2.1, 1.6),
@@ -509,6 +526,18 @@ function VehicleBuilder.CreateUte(
 	if not mountStoreTurret(vehicle, chassis, turretPosition) then
 		mountFallbackTurret(vehicle, chassis, turretPosition)
 	end
+
+	-- GDD 11.2 hit regions. Weapons resolve a hit by reading this attribute
+	-- rather than by matching part names, so every queryable part on the
+	-- vehicle has to declare one. Everything defaults to hull and the
+	-- operator box overrides itself, which is the correct default: an
+	-- unlabelled new part is structure, not crew.
+	for _, descendant in vehicle:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant:SetAttribute("HitRegion", "Hull")
+		end
+	end
+	personnelHitbox:SetAttribute("HitRegion", "Personnel")
 
 	vehicle:PivotTo(spawnCFrame)
 	vehicle.Parent = parent

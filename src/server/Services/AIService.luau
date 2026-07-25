@@ -6,14 +6,19 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
+local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
-local CombatService = require(script.Parent.CombatService)
 local VehicleBuilder = require(script.Parent.VehicleBuilder)
 local VehicleService = require(script.Parent.VehicleService)
+local WeaponService = require(script.Parent.WeaponService)
 
 local enemyVehicle: Model? = nil
 local lastFireAttempt = 0
-local AI_FIRE_INTERVAL = 0.55
+-- How often the AI *decides* to shoot, not how fast it shoots: WeaponService
+-- still enforces each weapon's own fire interval on top of this. Deliberately
+-- slower than the machine gun's 0.1s so the enemy reads as an opponent
+-- squeezing off bursts rather than a continuous stream of damage.
+local AI_FIRE_INTERVAL = 0.25
 
 -- Below 1 so the player can actually run the enemy down; without this the
 -- enemy shares the player's top speed and, having spawned ahead, can never
@@ -103,6 +108,23 @@ local function calculateDriving(chassis: BasePart, target: Model?, now: number):
 	return math.clamp(steer, -1, 1), throttle
 end
 
+-- GDD 13.5 combat AI: the enemy picks a weapon for the range it is at, which
+-- is what makes each weapon's role legible from the other side of the fight.
+-- Rockets are checked against the pool rather than fired hopefully, so an
+-- enemy out of rockets closes to gun range instead of dry-firing.
+local ROCKET_RANGE = 210
+local FLAME_RANGE = 42
+
+local function chooseWeapon(vehicle: Model, distance: number): string
+	if distance <= FLAME_RANGE and WeaponState.GetPool(vehicle, "FlameFuel") > 0 then
+		return "Flamethrower"
+	end
+	if distance >= ROCKET_RANGE and WeaponState.GetPool(vehicle, "Rockets") > 0 then
+		return "RocketLauncher"
+	end
+	return "MachineGun"
+end
+
 local function updateEnemy(deltaTime: number)
 	local vehicle = enemyVehicle
 	if not vehicle or not vehicle.Parent or vehicle:GetAttribute("Destroyed") then
@@ -128,11 +150,13 @@ local function updateEnemy(deltaTime: number)
 		if muzzle and muzzle:IsA("Attachment") then
 			if now - lastFireAttempt >= AI_FIRE_INTERVAL then
 				lastFireAttempt = now
+				local distance = (target.PrimaryPart.Position - chassis.Position).Magnitude
+				WeaponService.SelectWeapon(vehicle, chooseWeapon(vehicle, distance))
 				local predictedPosition = target.PrimaryPart.Position
 					+ target.PrimaryPart.AssemblyLinearVelocity * 0.08
 				local aimError =
 					Vector3.new(math.noise(now * 0.7) * 7, math.noise(now * 0.8 + 10) * 4, 0)
-				CombatService.TryFire(vehicle, predictedPosition + aimError - muzzle.WorldPosition)
+				WeaponService.TryFire(vehicle, predictedPosition + aimError - muzzle.WorldPosition)
 			end
 		end
 	end

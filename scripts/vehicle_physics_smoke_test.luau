@@ -23,14 +23,12 @@ end
 local services = ServerScriptService.Server.Services
 local RemoteService = require(services.RemoteService)
 local RoadService = require(services.RoadService)
-local CombatService = require(services.CombatService)
 local CollisionDamageService = require(services.CollisionDamageService)
 local VehicleBuilder = require(services.VehicleBuilder)
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 
 RemoteService.Start()
 RoadService.Start()
-CombatService.Start()
 CollisionDamageService.Start()
 
 local world = Workspace:WaitForChild("HoonangaWorld")

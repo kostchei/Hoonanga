@@ -4,6 +4,7 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
+local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 
 type ChunkRecord = {
@@ -326,19 +327,114 @@ local function addBoulder(parent: Instance, position: Vector3, scale: number)
 	CollectionService:AddTag(boulder, "RoadHardBoundary")
 end
 
-local function addFuelPickup(chunk: Model, cframe: CFrame)
-	local fuelPickup = Instance.new("Part")
-	fuelPickup.Name = "FuelPickup"
-	fuelPickup.Anchored = true
-	fuelPickup.CanCollide = false
-	fuelPickup.Size = Vector3.new(3.2, 4, 3.2)
-	fuelPickup.CFrame = cframe * CFrame.Angles(0, 0, math.rad(90))
-	fuelPickup.Shape = Enum.PartType.Cylinder
-	fuelPickup.Color = Color3.fromRGB(191, 59, 41)
-	fuelPickup.Material = Enum.Material.Metal
-	fuelPickup:SetAttribute("FuelAmount", 90)
-	fuelPickup.Parent = chunk
-	CollectionService:AddTag(fuelPickup, "FuelPickup")
+local FUEL_PICKUP_AMOUNT = 90
+
+-- Pickups have to be told apart at a glance from a moving vehicle, so each
+-- type gets its own colour and silhouette rather than a label nobody can read
+-- at 90 studs a second (GDD 15.3).
+local PICKUP_STYLES: { [string]: { Color: Color3, Shape: Enum.PartType, Size: Vector3 } } = {
+	Fuel = {
+		Color = Color3.fromRGB(191, 59, 41),
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(3.2, 4, 3.2),
+	},
+	Bullets = {
+		Color = Color3.fromRGB(198, 164, 66),
+		Shape = Enum.PartType.Block,
+		Size = Vector3.new(4, 2.6, 3),
+	},
+	Rockets = {
+		Color = Color3.fromRGB(96, 108, 150),
+		Shape = Enum.PartType.Block,
+		Size = Vector3.new(3, 3, 5.4),
+	},
+	FlameFuel = {
+		Color = Color3.fromRGB(214, 118, 38),
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(3, 3.4, 3),
+	},
+	Throwables = {
+		Color = Color3.fromRGB(150, 176, 92),
+		Shape = Enum.PartType.Block,
+		Size = Vector3.new(3.2, 2.8, 3.2),
+	},
+	Repair = {
+		Color = Color3.fromRGB(228, 228, 222),
+		Shape = Enum.PartType.Block,
+		Size = Vector3.new(4, 3, 4),
+	},
+}
+
+local function pickupAmount(pickupType: string): number
+	if pickupType == "Fuel" then
+		return FUEL_PICKUP_AMOUNT
+	elseif pickupType == "Repair" then
+		return WeaponConfig.RepairAmount
+	end
+
+	local pool = WeaponConfig.AmmoPools[pickupType]
+	if not pool then
+		error(string.format("No pickup amount defined for %q", pickupType))
+	end
+	return pool.PickupAmount
+end
+
+local function addPickup(chunk: Model, cframe: CFrame, pickupType: string)
+	local style = PICKUP_STYLES[pickupType]
+	if not style then
+		error(string.format("No pickup style defined for %q", pickupType))
+	end
+
+	local pickup = Instance.new("Part")
+	pickup.Name = pickupType .. "Pickup"
+	pickup.Anchored = true
+	pickup.CanCollide = false
+	pickup.Size = style.Size
+	pickup.Shape = style.Shape
+	pickup.CFrame = if style.Shape == Enum.PartType.Cylinder
+		then cframe * CFrame.Angles(0, 0, math.rad(90))
+		else cframe
+	pickup.Color = style.Color
+	pickup.Material = Enum.Material.Metal
+	pickup:SetAttribute("PickupType", pickupType)
+	pickup:SetAttribute("PickupAmount", pickupAmount(pickupType))
+	pickup.Parent = chunk
+	CollectionService:AddTag(pickup, "HoonangaPickup")
+end
+
+-- Ammunition types rotate rather than being rolled, so a run's supply line is
+-- predictable enough to plan around: you can decide to save rockets knowing
+-- more will come, instead of hoarding them because they might not.
+local AMMO_CYCLE = { "Bullets", "Rockets", "Bullets", "FlameFuel", "Bullets", "Throwables" }
+
+-- The whole supply line for one chunk. Cadence is index-driven rather than
+-- random so a seed reproduces the same run (GDD 8.5) and the tests can rely
+-- on seeing each pickup type inside the initial chunk count.
+--
+-- laneX is the chunk's drivable centre line and halfWidth how far either side
+-- of it is still road, so a pickup can be offset for interest without ending
+-- up in a canyon wall or off a highway deck.
+local function addChunkPickups(
+	chunk: Model,
+	index: number,
+	center: CFrame,
+	laneX: number,
+	halfWidth: number
+)
+	local function place(offsetX: number, offsetZ: number, pickupType: string)
+		local x = laneX + math.clamp(offsetX, -halfWidth + 4, halfWidth - 4)
+		addPickup(chunk, center * CFrame.new(x, 2.25, offsetZ), pickupType)
+	end
+
+	if index % 4 == 3 then
+		place(-13, -30, "Fuel")
+	end
+	if index % 3 == 0 then
+		place(11, 60, AMMO_CYCLE[(index // 3) % #AMMO_CYCLE + 1])
+	end
+	if index % 7 == 5 then
+		place(0, 150, "Repair")
+	end
 end
 
 local function addSockets(chunk: Model, centerZ: number, chunkLength: number)
@@ -448,9 +544,7 @@ local function addGroundRoad(
 		oil:SetAttribute("HazardType", "Oil")
 	end
 
-	if index % 4 == 3 then
-		addFuelPickup(chunk, center * CFrame.new(-13, 2.25, -30))
-	end
+	addChunkPickups(chunk, index, center, 0, ROAD_SURFACE_WIDTH / 2 + 12)
 
 	chunk:SetAttribute("PreferredLaneX", 0)
 end
@@ -577,9 +671,7 @@ local function configureCanyonChunk(chunk: Model, index: number, centerZ: number
 	local pinchSide = if index % 2 == 0 then -1 else 1
 	addBoulder(chunk, Vector3.new(pinchSide * (CANYON_WIDTH / 2 - 6), 1.8, centerZ), 0.85)
 
-	if index % 4 == 3 then
-		addFuelPickup(chunk, center * CFrame.new(-pinchSide * 8, 2.25, -120))
-	end
+	addChunkPickups(chunk, index, center, 0, CANYON_WIDTH / 2)
 
 	chunk:SetAttribute("PreferredLaneX", 0)
 end
@@ -617,9 +709,7 @@ local function configureHighwayChunk(chunk: Model, index: number, centerZ: numbe
 	rail.Parent = chunk
 	CollectionService:AddTag(rail, "RoadHardBoundary")
 
-	if index % 4 == 3 then
-		addFuelPickup(chunk, center * CFrame.new(-railedSide * (HIGHWAY_WIDTH / 2 - 6), 2.25, -100))
-	end
+	addChunkPickups(chunk, index, center, 0, HIGHWAY_WIDTH / 2)
 
 	chunk:SetAttribute("PreferredLaneX", 0)
 end
@@ -688,9 +778,7 @@ local function configureMudflatChunk(chunk: Model, index: number, centerZ: numbe
 		Enum.Material.Ground
 	)
 
-	if index % 4 == 3 then
-		addFuelPickup(chunk, center * CFrame.new(pathOffset, 2.25, -160))
-	end
+	addChunkPickups(chunk, index, center, pathOffset, ROAD_SURFACE_WIDTH / 2)
 
 	chunk:SetAttribute("PreferredLaneX", pathOffset)
 end
@@ -725,7 +813,10 @@ local function configureForkChunk(chunk: Model, index: number, centerZ: number)
 		Enum.Material.Mud
 	)
 	leftLane:SetAttribute("HazardType", "Mud")
-	addFuelPickup(chunk, center * CFrame.new(-laneOffset, 2.25, 0))
+	-- The fork's fuel is unconditional and sits in the mud lane: it is the
+	-- tradeoff the whole chunk exists for, not part of the ordinary cadence.
+	addPickup(chunk, center * CFrame.new(-laneOffset, 2.25, 0), "Fuel")
+	addChunkPickups(chunk, index, center, laneOffset, FORK_LANE_WIDTH / 2)
 
 	makeSurface(
 		chunk,

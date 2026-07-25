@@ -1,19 +1,34 @@
 --!strict
 
+-- The damage authority (GDD 11.1). Every point of damage in the game arrives
+-- here through one of the five channels, whoever caused it: bullets, blast,
+-- fire ticks, ramming and terrain all converge on ApplyDamage.
+--
+-- Deliberately at the bottom of the service dependency graph. It requires no
+-- weapon, projectile or fire code, which is what lets WeaponService,
+-- ProjectileService, FireService and CollisionDamageService all require *it*
+-- without a cycle.
+
 local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
-local RemoteService = require(script.Parent.RemoteService)
-local VehicleService = require(script.Parent.VehicleService)
+local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 
-local lastShotAt: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local CombatService = {}
 
-local function getVehicleFromPart(part: Instance?): Model?
+local function requireNumber(vehicle: Model, attribute: string): number
+	local value = vehicle:GetAttribute(attribute)
+	if typeof(value) ~= "number" then
+		error(string.format("%s has no numeric %s attribute", vehicle:GetFullName(), attribute), 3)
+	end
+	return value
+end
+
+function CombatService.GetVehicleFromPart(part: Instance?): Model?
 	local current = part
 	while current and current ~= Workspace do
 		if current:IsA("Model") and CollectionService:HasTag(current, "HoonangaVehicle") then
@@ -24,10 +39,31 @@ local function getVehicleFromPart(part: Instance?): Model?
 	return nil
 end
 
-local function isPlayerDriving(player: Player, vehicle: Model): boolean
-	return VehicleService.GetPlayerVehicle(player) == vehicle
-		and vehicle:GetAttribute("OwnerUserId") == player.UserId
-		and vehicle:GetAttribute("Destroyed") ~= true
+-- GDD 11.2 hit regions. Parts declare what they are with a HitRegion
+-- attribute rather than being matched by name, so a Creator Store body part
+-- or a future engine/fuel-tank region is a data change and not a new string
+-- comparison in the weapon code.
+function CombatService.GetHitRegion(part: Instance?): string
+	if not part then
+		return "Hull"
+	end
+	local region = part:GetAttribute("HitRegion")
+	if typeof(region) == "string" then
+		return region
+	end
+	return "Hull"
+end
+
+-- GDD 24.3 friendly-convoy immunity. A nil source is the world itself
+-- (terrain, falls, boundary impacts), which is hostile to everyone.
+function CombatService.IsHostile(source: Model?, target: Model): boolean
+	if not source then
+		return true
+	end
+	if source == target then
+		return false
+	end
+	return source:GetAttribute("Team") ~= target:GetAttribute("Team")
 end
 
 local function awardKill(sourceVehicle: Model?, targetVehicle: Model)
@@ -136,12 +172,7 @@ local function applyHullDamage(vehicle: Model, damage: number, sourceVehicle: Mo
 		return
 	end
 
-	local hull = vehicle:GetAttribute("Hull")
-	if typeof(hull) ~= "number" then
-		return
-	end
-
-	hull = math.max(0, hull - damage)
+	local hull = math.max(0, requireNumber(vehicle, "Hull") - damage)
 	vehicle:SetAttribute("Hull", hull)
 	if hull <= 0 then
 		destroyVehicle(vehicle, sourceVehicle)
@@ -151,40 +182,114 @@ end
 -- Personnel health is tracked on the vehicle rather than a real Humanoid:
 -- the AI enemy has no character at all, and the player's own character is
 -- welded into the seat with CanQuery disabled, so neither can be hit
--- directly by a raycast. Milestone 1 has no convoy/control-transfer system
--- to hand off to (that's Milestone 4), so per GDD 11.6 a killed operator
+-- directly by a raycast. There is no convoy/control-transfer system to hand
+-- off to yet (that is Milestone 4), so per GDD 11.6 a killed operator
 -- eliminates the single-vehicle "convoy" the same way hull loss does.
 local function applyOperatorDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
 	if vehicle:GetAttribute("Destroyed") then
 		return
 	end
 
-	local operatorHealth = vehicle:GetAttribute("OperatorHealth")
-	if typeof(operatorHealth) ~= "number" then
-		return
-	end
-
-	operatorHealth = math.max(0, operatorHealth - damage)
+	local operatorHealth = math.max(0, requireNumber(vehicle, "OperatorHealth") - damage)
 	vehicle:SetAttribute("OperatorHealth", operatorHealth)
 	if operatorHealth <= 0 then
 		destroyVehicle(vehicle, sourceVehicle)
 	end
 end
 
-local CombatService = {}
+-- GDD 11.1 impact channel. Ram equipment modifies both the damage dealt and
+-- the damage received, so a bull-barred ute wins an exchange it would
+-- otherwise trade evenly - which is what makes ramming an equipment choice
+-- rather than just a consequence of steering badly.
+local function applyImpactDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
+	local dealtMultiplier = if sourceVehicle
+		then requireNumber(sourceVehicle, "RamDealtMultiplier")
+		else 1
+	local receivedMultiplier = requireNumber(vehicle, "RamReceivedMultiplier")
+	applyHullDamage(vehicle, damage * dealtMultiplier * receivedMultiplier, sourceVehicle)
+end
 
-function CombatService.ApplyHullDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
-	if damage <= 0 or damage ~= damage then
+function CombatService.ApplyDamage(
+	vehicle: Model,
+	channel: WeaponConfig.DamageChannel,
+	amount: number,
+	sourceVehicle: Model?
+)
+	-- Rejects NaN as well as non-positive damage: NaN propagates silently
+	-- through the hull arithmetic and leaves a vehicle that can never die.
+	if not (amount > 0) then
 		return
 	end
-	applyHullDamage(vehicle, damage, sourceVehicle)
+
+	if channel == "Hull" then
+		applyHullDamage(vehicle, amount, sourceVehicle)
+	elseif channel == "Personnel" then
+		applyOperatorDamage(vehicle, amount, sourceVehicle)
+	elseif channel == "Impact" then
+		applyImpactDamage(vehicle, amount, sourceVehicle)
+	elseif channel == "Fire" then
+		-- Fire is not a pool of its own: FireService splits a tick into hull
+		-- and personnel portions and sends each through this function.
+		error("Fire damage must be applied as its Hull and Personnel components", 2)
+	elseif channel == "Terrain" then
+		applyHullDamage(vehicle, amount, nil)
+	else
+		error(string.format("Unknown damage channel %q", tostring(channel)), 2)
+	end
+end
+
+function CombatService.ApplyHullDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
+	CombatService.ApplyDamage(vehicle, "Hull", damage, sourceVehicle)
 end
 
 function CombatService.ApplyOperatorDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
-	if damage <= 0 or damage ~= damage then
-		return
+	CombatService.ApplyDamage(vehicle, "Personnel", damage, sourceVehicle)
+end
+
+function CombatService.ApplyImpactDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
+	CombatService.ApplyDamage(vehicle, "Impact", damage, sourceVehicle)
+end
+
+-- Routes a weapon hit to the channel the hit region implies. Returns the
+-- damage actually dealt so callers can decide whether the shot "connected"
+-- for feedback purposes - a pistol round on a hull returns 0, which is the
+-- weapon working as designed rather than a miss.
+function CombatService.ApplyWeaponHit(
+	target: Model,
+	hitRegion: string,
+	config: WeaponConfig.WeaponConfig,
+	sourceVehicle: Model?,
+	damageMultiplier: number
+): number
+	if not CombatService.IsHostile(sourceVehicle, target) then
+		return 0
 	end
-	applyOperatorDamage(vehicle, damage, sourceVehicle)
+
+	if hitRegion == "Personnel" then
+		local damage = config.PersonnelDamage * damageMultiplier
+		CombatService.ApplyDamage(target, "Personnel", damage, sourceVehicle)
+		return damage
+	end
+
+	local damage = config.HullDamage * damageMultiplier
+	CombatService.ApplyDamage(target, "Hull", damage, sourceVehicle)
+	return damage
+end
+
+-- GDD 12.3. Repairs restore hull and never resurrect a destroyed vehicle.
+function CombatService.Repair(vehicle: Model, amount: number): number
+	if vehicle:GetAttribute("Destroyed") then
+		return 0
+	end
+
+	local hull = requireNumber(vehicle, "Hull")
+	local maxHull = requireNumber(vehicle, "MaxHull")
+	local restored = math.min(amount, maxHull - hull)
+	if restored <= 0 then
+		return 0
+	end
+	vehicle:SetAttribute("Hull", hull + restored)
+	return restored
 end
 
 function CombatService.DestroyVehicle(vehicle: Model, sourceVehicle: Model?)
@@ -193,152 +298,6 @@ end
 
 function CombatService.StrandVehicle(vehicle: Model)
 	strandVehicle(vehicle)
-end
-
-local function fireRay(
-	vehicle: Model,
-	origin: Vector3,
-	direction: Vector3,
-	config: WeaponConfig.WeaponConfig
-)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { vehicle }
-	params.IgnoreWater = false
-
-	local result = Workspace:Raycast(origin, direction * config.Range, params)
-	local endPosition = origin + direction * config.Range
-	if result then
-		endPosition = result.Position
-		local targetVehicle = getVehicleFromPart(result.Instance)
-		if targetVehicle and targetVehicle ~= vehicle then
-			local sameTeam = targetVehicle:GetAttribute("Team") == vehicle:GetAttribute("Team")
-			if not sameTeam then
-				local damageMultiplier = vehicle:GetAttribute("DamageMultiplier")
-				if typeof(damageMultiplier) ~= "number" then
-					damageMultiplier = 1
-				end
-				if result.Instance.Name == "PersonnelHitbox" then
-					applyOperatorDamage(
-						targetVehicle,
-						config.PersonnelDamage * damageMultiplier,
-						vehicle
-					)
-				else
-					applyHullDamage(targetVehicle, config.Damage * damageMultiplier, vehicle)
-				end
-			end
-		end
-	end
-
-	RemoteService.Get("WeaponFired"):FireAllClients(origin, endPosition)
-end
-
-function CombatService.TryFire(vehicle: Model, desiredDirection: Vector3): boolean
-	if vehicle:GetAttribute("Destroyed") or desiredDirection.Magnitude < 0.9 then
-		return false
-	end
-
-	local chassis = vehicle.PrimaryPart
-	if not chassis then
-		return false
-	end
-
-	local turretConfig = WeaponConfig.MachineGun
-	local now = Workspace:GetServerTimeNow()
-	local lastShot = lastShotAt[vehicle] or 0
-	if now - lastShot < turretConfig.FireInterval * 0.9 then
-		return false
-	end
-
-	local ammo = vehicle:GetAttribute("Ammo")
-	if typeof(ammo) ~= "number" or ammo <= 0 or vehicle:GetAttribute("Reloading") then
-		return false
-	end
-
-	local turretMuzzle = chassis:FindFirstChild("TurretMuzzleAttachment")
-	if not turretMuzzle or not turretMuzzle:IsA("Attachment") then
-		return false
-	end
-
-	local aimDirection = desiredDirection.Unit
-	local forwardAlignment = aimDirection:Dot(chassis.CFrame.LookVector)
-	local forwardGunActive = forwardAlignment
-			>= math.cos(math.rad(WeaponConfig.ForwardGunConeDegrees))
-		and ammo >= 2
-
-	lastShotAt[vehicle] = now
-	vehicle:SetAttribute("Ammo", ammo - (if forwardGunActive then 2 else 1))
-	fireRay(vehicle, turretMuzzle.WorldPosition, aimDirection, turretConfig)
-
-	if forwardGunActive then
-		local forwardMuzzle = chassis:FindFirstChild("ForwardMuzzleAttachment")
-		if forwardMuzzle and forwardMuzzle:IsA("Attachment") then
-			fireRay(
-				vehicle,
-				forwardMuzzle.WorldPosition,
-				chassis.CFrame.LookVector,
-				WeaponConfig.ForwardGun
-			)
-		end
-	end
-
-	return true
-end
-
-function CombatService.Reload(vehicle: Model)
-	if vehicle:GetAttribute("Destroyed") or vehicle:GetAttribute("Reloading") then
-		return
-	end
-
-	local config = WeaponConfig.MachineGun
-	local ammo = vehicle:GetAttribute("Ammo")
-	local reserve = vehicle:GetAttribute("ReserveAmmo")
-	if typeof(ammo) ~= "number" or typeof(reserve) ~= "number" then
-		return
-	end
-	if ammo >= config.MagazineSize or reserve <= 0 then
-		return
-	end
-
-	vehicle:SetAttribute("Reloading", true)
-	task.delay(config.ReloadTime, function()
-		if not vehicle.Parent or vehicle:GetAttribute("Destroyed") then
-			return
-		end
-
-		local currentAmmo = vehicle:GetAttribute("Ammo")
-		local currentReserve = vehicle:GetAttribute("ReserveAmmo")
-		if typeof(currentAmmo) ~= "number" or typeof(currentReserve) ~= "number" then
-			return
-		end
-
-		local required = config.MagazineSize - currentAmmo
-		local loaded = math.min(required, currentReserve)
-		vehicle:SetAttribute("Ammo", currentAmmo + loaded)
-		vehicle:SetAttribute("ReserveAmmo", currentReserve - loaded)
-		vehicle:SetAttribute("Reloading", false)
-	end)
-end
-
-function CombatService.Start()
-	RemoteService.Get("FireWeapon").OnServerEvent:Connect(function(player, direction)
-		if typeof(direction) ~= "Vector3" then
-			return
-		end
-
-		local vehicle = VehicleService.GetPlayerVehicle(player)
-		if vehicle and isPlayerDriving(player, vehicle) then
-			CombatService.TryFire(vehicle, direction)
-		end
-	end)
-
-	RemoteService.Get("ReloadWeapon").OnServerEvent:Connect(function(player)
-		local vehicle = VehicleService.GetPlayerVehicle(player)
-		if vehicle and isPlayerDriving(player, vehicle) then
-			CombatService.Reload(vehicle)
-		end
-	end)
 end
 
 return CombatService

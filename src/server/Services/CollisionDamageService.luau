@@ -94,8 +94,11 @@ local function applyVehicleImpact(first: Model, second: Model)
 	second:SetAttribute("LastImpactSpeed", closingSpeed)
 	second:SetAttribute("LastImpactType", "Vehicle")
 	second:SetAttribute("LastImpactAt", now)
-	CombatService.ApplyHullDamage(first, damageToFirst, second)
-	CombatService.ApplyHullDamage(second, damageToSecond, first)
+	-- Impact rather than hull, so ram equipment on either vehicle modifies
+	-- the exchange (GDD 11.4). Deliberately not friendly-fire immune: two
+	-- convoy vehicles that collide at 60 studs a second have still collided.
+	CombatService.ApplyImpactDamage(first, damageToFirst, second)
+	CombatService.ApplyImpactDamage(second, damageToSecond, first)
 end
 
 local function applyBoundaryImpact(vehicle: Model, boundary: BasePart)
@@ -119,7 +122,9 @@ local function applyBoundaryImpact(vehicle: Model, boundary: BasePart)
 	vehicle:SetAttribute("LastImpactSpeed", speed)
 	vehicle:SetAttribute("LastImpactType", boundary:GetAttribute("BoundaryType") or "Terrain")
 	vehicle:SetAttribute("LastImpactAt", now)
-	CombatService.ApplyHullDamage(vehicle, damage, nil)
+	-- Terrain, not impact: a ram bar helps you win a ramming exchange, it
+	-- does not help you hit a canyon wall.
+	CombatService.ApplyDamage(vehicle, "Terrain", damage, nil)
 end
 
 local function bindVehicle(instance: Instance)

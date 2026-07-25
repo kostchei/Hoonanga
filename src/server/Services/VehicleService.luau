@@ -146,9 +146,8 @@ local function validatePlayerVehicle(player: Player, vehicle: Model, now: number
 	local withinImpactGrace = typeof(lastImpactAt) == "number"
 		and (now - lastImpactAt) < IMPACT_GRACE_WINDOW
 
-	if invalid and withinImpactGrace then
-		state.Position = chassis.Position
-	elseif invalid then
+	-- Only rewind impossible movement if outside the impact grace window
+	if invalid and not withinImpactGrace then
 		warn(
 			string.format(
 				"[Hoonanga] Corrected impossible movement from %s (%.1f studs in %.2fs)",
@@ -338,6 +337,16 @@ end
 
 function VehicleService.GetPlayerVehicle(player: Player): Model?
 	return playerVehicles[player]
+end
+
+-- The first gate on every weapon remote (GDD 14.4): the requester must own
+-- this vehicle, it must be the vehicle the server has them in, and it must
+-- still be alive. Lives here rather than in the weapon code because this is
+-- the service that owns the player-to-vehicle mapping.
+function VehicleService.IsPlayerDriving(player: Player, vehicle: Model): boolean
+	return playerVehicles[player] == vehicle
+		and vehicle:GetAttribute("OwnerUserId") == player.UserId
+		and vehicle:GetAttribute("Destroyed") ~= true
 end
 
 return VehicleService

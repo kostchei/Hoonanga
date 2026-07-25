@@ -24,20 +24,28 @@ local VehicleService = require(services.VehicleService)
 local PickupService = require(services.PickupService)
 local FuelService = require(services.FuelService)
 local CombatService = require(services.CombatService)
+local WeaponService = require(services.WeaponService)
+local ProjectileService = require(services.ProjectileService)
+local FireService = require(services.FireService)
 local CollisionDamageService = require(services.CollisionDamageService)
 local AIService = require(services.AIService)
 local VehicleBuilder = require(services.VehicleBuilder)
+local WeaponState = require(shared.WeaponState)
+local WeaponConfig = require(shared.Config.WeaponConfig)
 
 RemoteService.Start()
 local remotes = ReplicatedStorage:FindFirstChild("HoonangaRemotes")
 expect(remotes ~= nil, "RemoteService did not create HoonangaRemotes")
 expect(remotes:FindFirstChild("VehicleInput") ~= nil, "VehicleInput remote is missing")
+expect(remotes:FindFirstChild("SelectWeapon") ~= nil, "SelectWeapon remote is missing")
 
 RoadService.Start()
 VehicleService.Start()
 PickupService.Start()
 FuelService.Start()
-CombatService.Start()
+WeaponService.Start()
+ProjectileService.Start()
+FireService.Start()
 CollisionDamageService.Start()
 AIService.Start()
 
@@ -141,7 +149,27 @@ local personnelHitbox = enemy:FindFirstChild("PersonnelHitbox")
 expect(personnelHitbox ~= nil, "enemy ute has no personnel hitbox")
 expect(personnelHitbox.CanQuery, "personnel hitbox cannot be hit by weapon raycasts")
 expect(not personnelHitbox.CanCollide, "personnel hitbox physically collides")
+expect(
+	personnelHitbox:GetAttribute("HitRegion") == "Personnel",
+	"personnel hitbox is not tagged as the personnel hit region"
+)
+expect(
+	enemy.PrimaryPart:GetAttribute("HitRegion") == "Hull",
+	"enemy chassis is not tagged as a hull hit region"
+)
 expect(enemy:GetAttribute("OperatorHealth") == 100, "enemy ute operator health not initialized")
+expect(enemy:GetAttribute("Heat") == 0, "enemy ute fire heat not initialized")
+expect(enemy:GetAttribute("FireState") == "None", "enemy ute fire state not initialized")
+expect(
+	enemy:GetAttribute("ActiveWeapon") == WeaponConfig.DefaultWeapon,
+	"enemy ute did not start on the default weapon"
+)
+for pool in WeaponConfig.AmmoPools do
+	expect(
+		typeof(enemy:GetAttribute(WeaponState.PoolAttribute(pool))) == "number",
+		string.format("enemy ute has no %s ammunition pool", pool)
+	)
+end
 expect(
 	enemy:GetAttribute("VisualAssetId") == 6418225759,
 	"enemy ute did not mount the audited pickup body"

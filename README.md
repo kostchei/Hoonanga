@@ -54,15 +54,22 @@ selene src
 rojo build default.project.json --output build/Hoonanga.rbxlx
 ```
 
-The Studio smoke test uses Roblox Studio's command-line interface after the place is built:
+The Studio tests run headlessly through Roblox Studio's command-line `RunScript`
+task. `scripts/run_studio_test.sh` builds the place, runs a test script against
+it and fails unless the test prints its success line:
 
-```powershell
-RobloxStudioBeta.exe --task RunScript `
-  --localPlaceFile "build/Hoonanga.rbxlx" `
-  --runScriptFile "scripts/studio_smoke_test.luau" `
-  --outputFile "build/studio-smoke.log" `
-  --quitAfterExecution
+```bash
+scripts/run_studio_test.sh default.project.json scripts/studio_smoke_test.luau smoke '^\[SMOKE\] PASS: [0-9]'
 ```
+
+| Test script | Name | Success pattern |
+|---|---|---|
+| `scripts/studio_smoke_test.luau` | `smoke` | `^\[SMOKE\] PASS: [0-9]` |
+| `scripts/combat_test.luau` | `combat` | `^\[COMBAT\] PASS:` |
+| `scripts/road_coverage_test.luau` | `coverage` | `^\[COVERAGE\] PASS:` |
+| `scripts/road_recycle_test.luau` | `recycle` | `^\[RECYCLE\] PASS:` |
+| `scripts/road_seed_test.luau` | `seed` | `^\[SEED\] PASS:` |
+| `scripts/concurrent_vehicle_test.luau` | `concurrent` | `^\[CONCURRENT\] PASS:` |
 
 See [the game design document](docs/GAME_DESIGN_DOCUMENT.md) for the agreed scope and milestone plan.
 

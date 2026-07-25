@@ -1,11 +1,28 @@
 --!strict
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
+local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
+
+local CROSSHAIR_READY = Color3.fromRGB(255, 196, 92)
+-- GDD 11.3: the crosshair changes when the aim point is outside the mount's
+-- traverse or the muzzle is obstructed, so "why is nothing happening" is
+-- answered on screen rather than by the player experimenting.
+local CROSSHAIR_BLOCKED = Color3.fromRGB(255, 82, 66)
+local CROSSHAIR_OUT_OF_TRAVERSE = Color3.fromRGB(128, 176, 255)
+
+local FIRE_STATE_TEXT: { [string]: string } = {
+	Heating = "HEAT RISING",
+	Ignited = "ON FIRE",
+	Burning = "BURNING",
+	Critical = "CRITICAL - FIND MUD",
+}
 
 local function makeLabel(
 	parent: Instance,
@@ -72,6 +89,15 @@ function HUDController.Start()
 		Enum.TextXAlignment.Right
 	)
 
+	local weapon = makeLabel(
+		gui,
+		"Weapon",
+		UDim2.new(1, -242, 1, -122),
+		UDim2.fromOffset(220, 34),
+		18,
+		Enum.TextXAlignment.Right
+	)
+
 	local warning = makeLabel(
 		gui,
 		"Warning",
@@ -88,6 +114,7 @@ function HUDController.Start()
 		local visible = vehicle ~= nil
 		status.Visible = visible
 		ammo.Visible = visible
+		weapon.Visible = visible
 		crosshair.Visible = visible
 		if not vehicle or not vehicle.PrimaryPart then
 			warning.Visible = false
@@ -106,9 +133,10 @@ function HUDController.Start()
 			or vehicle:GetAttribute("SurfaceProfile")
 			or "UNKNOWN"
 		local distance = math.max(0, -vehicle.PrimaryPart.Position.Z)
-		local magazine = vehicle:GetAttribute("Ammo") or 0
-		local reserve = vehicle:GetAttribute("ReserveAmmo") or 0
 		local kills = localPlayer:GetAttribute("Kills") or 0
+		local weaponConfig = WeaponState.GetActiveWeapon(vehicle)
+		local loaded = WeaponState.GetLoaded(vehicle, weaponConfig)
+		local pool = WeaponState.GetPool(vehicle, weaponConfig.AmmoPool)
 
 		status.Text = string.format(
 			" SPEED  %03d\n FUEL   %03d%%\n HULL   %03d%%\n KILLS  %02d\n %s  |  %.2f km",
@@ -119,17 +147,49 @@ function HUDController.Start()
 			string.upper(surface),
 			distance / 1000
 		)
-		ammo.Text = if vehicle:GetAttribute("Reloading")
+		weapon.Text = weaponConfig.DisplayName
+		-- Magazine-fed weapons read "loaded / reserve"; pool-fed ones have no
+		-- magazine to separate out, so they show the pool alone rather than
+		-- printing the same number twice.
+		ammo.Text = if WeaponState.IsReloading(vehicle, weaponConfig)
 			then "RELOADING"
-			else string.format("%02d / %03d", magazine, reserve)
+			elseif weaponConfig.MagazineSize > 0 then string.format(
+				"%02d / %03d",
+				loaded,
+				pool
+			)
+			else string.format(
+				"%s  %02d",
+				WeaponConfig.AmmoPools[weaponConfig.AmmoPool].DisplayName,
+				pool
+			)
 
-		-- VehicleLocator only ever returns non-destroyed vehicles, so this
-		-- can only ever be the out-of-fuel case; the destroyed/run-over
-		-- case is handled by RunResultController instead, since by the
-		-- time Destroyed is true this HUD's vehicle lookup already returns
-		-- nil and the whole status block above is hidden.
-		warning.Visible = vehicle:GetAttribute("OutOfFuel") == true
-		warning.Text = "OUT OF FUEL"
+		if vehicle:GetAttribute("MuzzleBlocked") == true then
+			crosshair.BackgroundColor3 = CROSSHAIR_BLOCKED
+		elseif vehicle:GetAttribute("AimOutOfTraverse") == true then
+			crosshair.BackgroundColor3 = CROSSHAIR_OUT_OF_TRAVERSE
+		else
+			crosshair.BackgroundColor3 = CROSSHAIR_READY
+		end
+
+		-- VehicleLocator only ever returns non-destroyed vehicles, so the
+		-- destroyed/run-over case is handled by RunResultController instead:
+		-- by the time Destroyed is true this HUD's vehicle lookup already
+		-- returns nil and the whole status block above is hidden.
+		--
+		-- Fire outranks fuel: running dry is a slow problem you can plan
+		-- around, and burning is not.
+		local fireState = vehicle:GetAttribute("FireState")
+		local fireText = if typeof(fireState) == "string" then FIRE_STATE_TEXT[fireState] else nil
+		if fireText then
+			warning.Visible = true
+			warning.Text = fireText
+		elseif vehicle:GetAttribute("OutOfFuel") == true then
+			warning.Visible = true
+			warning.Text = "OUT OF FUEL"
+		else
+			warning.Visible = false
+		end
 	end)
 end
 
