@@ -67,12 +67,85 @@ end
 -- rare: picking it is uncommon, but it occupies 3-4 chunks each time and
 -- nothing stopped it being picked again one short run later, which in
 -- practice produced stretches that were nearly 40% elevated deck.
+-- Difficulty/MinSpeed/MaxActiveEnemies/AllowsFork are the per-family half of
+-- GDD 8.2's chunk metadata. Nothing consumes them for gameplay yet - the
+-- encounter director that will read MaxActiveEnemies is Milestone 4 - but
+-- they are published on every chunk now so that director has something to
+-- read, and so a chunk can be inspected in the explorer and understood.
 local ROAD_FAMILY_WEIGHTS = {
-	{ Name = "BoulderPlain", Weight = 10, MinRun = 4, MaxRun = 8, CooldownRuns = 0 },
-	{ Name = "SandyDesert", Weight = 10, MinRun = 4, MaxRun = 8, CooldownRuns = 0 },
-	{ Name = "Canyon", Weight = 9, MinRun = 3, MaxRun = 6, CooldownRuns = 1 },
-	{ Name = "Mudflat", Weight = 5, MinRun = 1, MaxRun = 3, CooldownRuns = 2 },
-	{ Name = "RaisedHighway", Weight = 2, MinRun = 3, MaxRun = 4, CooldownRuns = 5 },
+	{
+		Name = "BoulderPlain",
+		Weight = 10,
+		MinRun = 4,
+		MaxRun = 8,
+		CooldownRuns = 0,
+		Difficulty = 1,
+		MinSpeed = 0,
+		MaxActiveEnemies = 3,
+		AllowsFork = true,
+	},
+	{
+		Name = "SandyDesert",
+		Weight = 10,
+		MinRun = 4,
+		MaxRun = 8,
+		CooldownRuns = 0,
+		Difficulty = 1,
+		MinSpeed = 0,
+		MaxActiveEnemies = 3,
+		AllowsFork = true,
+	},
+	{
+		Name = "Canyon",
+		Weight = 9,
+		MinRun = 3,
+		MaxRun = 6,
+		CooldownRuns = 1,
+		Difficulty = 3,
+		MinSpeed = 0,
+		MaxActiveEnemies = 2,
+		AllowsFork = false,
+	},
+	{
+		Name = "Mudflat",
+		Weight = 5,
+		MinRun = 1,
+		MaxRun = 3,
+		CooldownRuns = 2,
+		Difficulty = 2,
+		MinSpeed = 0,
+		MaxActiveEnemies = 2,
+		AllowsFork = true,
+	},
+	{
+		Name = "RaisedHighway",
+		Weight = 2,
+		MinRun = 3,
+		MaxRun = 4,
+		CooldownRuns = 5,
+		Difficulty = 4,
+		-- Crawling on an exposed deck is how you get rammed off it.
+		MinSpeed = 25,
+		MaxActiveEnemies = 1,
+		AllowsFork = false,
+	},
+}
+
+local FAMILY_BY_NAME: { [string]: any } = {}
+for _, entry in ROAD_FAMILY_WEIGHTS do
+	FAMILY_BY_NAME[entry.Name] = entry
+end
+
+-- Fork is placed on its own schedule rather than being weight-selected, so
+-- it is not in the table above, but it still needs metadata like any other
+-- chunk. AllowsFork is false because you are already committing to a branch.
+FAMILY_BY_NAME.Fork = {
+	Name = "Fork",
+	Weight = 0,
+	Difficulty = 2,
+	MinSpeed = 0,
+	MaxActiveEnemies = 2,
+	AllowsFork = false,
 }
 
 -- The good ground you actually race on: a clear road down the middle of far
@@ -699,6 +772,7 @@ local function configureChunk(chunk: Model, index: number)
 	local centerZ = -(index * road.ChunkLength)
 	chunk.Name = string.format("Chunk_%04d", index)
 	chunk:SetAttribute("ChunkIndex", index)
+	local groundEntryY = groundExitY
 
 	-- A fork mid-highway-run would sit at ground level between deck chunks -
 	-- the same cliff problem the ramp chunks exist to avoid. currentFamily
@@ -753,18 +827,62 @@ local function configureChunk(chunk: Model, index: number)
 		groundExitY = applyChunkSlope(chunk, centerZ, pitch, roll)
 	end
 
+	-- GDD 8.2 chunk metadata. EntryHeading/ExitHeading are both 0 because
+	-- every chunk is still a straight corridor along -Z; they exist now so
+	-- that when curvature lands, socket matching has a field to check rather
+	-- than needing every chunk revisited.
+	local entryFamily = chunk:GetAttribute("RoadFamily") :: string
+	local familyInfo = FAMILY_BY_NAME[entryFamily]
+	chunk:SetAttribute("ChunkId", string.format("%s_%04d", entryFamily, index))
+	chunk:SetAttribute("Length", road.ChunkLength)
+	chunk:SetAttribute("EntryHeading", 0)
+	chunk:SetAttribute("ExitHeading", 0)
+	chunk:SetAttribute("GroundEntryY", groundEntryY)
 	chunk:SetAttribute("GroundExitY", groundExitY)
+	chunk:SetAttribute("Difficulty", if familyInfo then familyInfo.Difficulty else 2)
+	chunk:SetAttribute("MinSpeed", if familyInfo then familyInfo.MinSpeed else 0)
+	chunk:SetAttribute("MaxActiveEnemies", if familyInfo then familyInfo.MaxActiveEnemies else 2)
+	chunk:SetAttribute("AllowsFork", if familyInfo then familyInfo.AllowsFork else true)
+	chunk:SetAttribute("Weight", if familyInfo then familyInfo.Weight else 0)
+
 	addSockets(chunk, centerZ, road.ChunkLength)
 end
 
 local function createChunk(index: number): ChunkRecord
 	local model = Instance.new("Model")
+	-- GDD 8.4 lifecycle. Reserved covers the window where the director has
+	-- committed to a chunk but its geometry does not exist yet; Placed means
+	-- built and positioned; Active means it is part of the live road.
+	model:SetAttribute("LifecycleState", "Reserved")
 	model.Parent = chunkFolder
 	configureChunk(model, index)
+	model:SetAttribute("LifecycleState", "Placed")
+	model:SetAttribute("Occupancy", 0)
+	model:SetAttribute("LifecycleState", "Active")
 	return {
 		Index = index,
 		Model = model,
 	}
+end
+
+-- Counts vehicles physically standing inside each chunk, keyed by chunk
+-- index. This is the safety net the distance heuristic cannot provide: it is
+-- about where things actually *are*, so nothing can have the road deleted out
+-- from under it even if the progress rule says the chunk is long past.
+local function countOccupancy(): { [number]: number }
+	local occupancy = {}
+	local chunkLength = WorldConfig.Road.ChunkLength
+	for _, vehicle in CollectionService:GetTagged("HoonangaVehicle") do
+		if
+			vehicle:IsA("Model")
+			and vehicle.PrimaryPart
+			and not vehicle:GetAttribute("Destroyed")
+		then
+			local index = math.floor(-vehicle.PrimaryPart.Position.Z / chunkLength + 0.5)
+			occupancy[index] = (occupancy[index] or 0) + 1
+		end
+	end
+	return occupancy
 end
 
 local function slowestPlayerProgress(): number
@@ -786,9 +904,26 @@ end
 local function recyclePassedChunks()
 	local road = WorldConfig.Road
 	local progress = slowestPlayerProgress()
+	local occupancy = countOccupancy()
 	table.sort(chunks, function(a, b)
 		return a.Index < b.Index
 	end)
+
+	for _, record in chunks do
+		local occupants = occupancy[record.Index] or 0
+		record.Model:SetAttribute("Occupancy", occupants)
+		-- Passed: the road behind everyone, still standing but no longer
+		-- carrying anything. Chunks flip back to Active if someone doubles
+		-- back into them, which is reachable now that the terrain is wide
+		-- enough to turn around in.
+		if record.Model:GetAttribute("LifecycleState") ~= "Reserved" then
+			local chunkEnd = (record.Index + 0.5) * road.ChunkLength
+			record.Model:SetAttribute(
+				"LifecycleState",
+				if occupants == 0 and progress > chunkEnd then "Passed" else "Active"
+			)
+		end
+	end
 
 	while #chunks > 0 do
 		local first = chunks[1]
@@ -796,8 +931,14 @@ local function recyclePassedChunks()
 		if progress - chunkEndProgress < road.RecycleDistance then
 			break
 		end
+		-- Never pull the road out from under anything, whatever the
+		-- distance rule says.
+		if (occupancy[first.Index] or 0) > 0 then
+			break
+		end
 
 		table.remove(chunks, 1)
+		first.Model:SetAttribute("LifecycleState", "Retired")
 		first.Model:Destroy()
 		local replacement = createChunk(nextChunkIndex)
 		nextChunkIndex += 1

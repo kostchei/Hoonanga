@@ -100,6 +100,30 @@ expect(
 	"fork chunk's left-lane fuel tradeoff is missing"
 )
 
+-- GDD 8.2 chunk metadata. Nothing consumes most of these yet, so without an
+-- assertion they would silently rot as families are added and changed.
+for _, chunkModel in roadChunks:GetChildren() do
+	for _, attribute in
+		{
+			"ChunkId",
+			"RoadFamily",
+			"Difficulty",
+			"Length",
+			"EntryHeading",
+			"ExitHeading",
+			"AllowsFork",
+			"MinSpeed",
+			"MaxActiveEnemies",
+			"Weight",
+		}
+	do
+		expect(
+			chunkModel:GetAttribute(attribute) ~= nil,
+			string.format("chunk %s is missing metadata %s", chunkModel.Name, attribute)
+		)
+	end
+end
+
 local vehicles = world:FindFirstChild("Vehicles")
 expect(vehicles ~= nil, "Vehicles folder is missing")
 local enemy = vehicles:FindFirstChild("EnemyUte_01")

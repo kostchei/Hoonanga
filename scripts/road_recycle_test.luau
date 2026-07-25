@@ -125,10 +125,59 @@ for step = 1, STEPS do
 	)
 end
 
+-- Occupancy (GDD 8.4): the distance rule alone would happily delete a chunk
+-- someone is still standing in. A second vehicle left far behind - a stalled
+-- companion, or a player who doubled back - must keep its chunk alive.
+local straggler = Instance.new("Model")
+straggler.Name = "StragglerProbe"
+local stragglerChassis = Instance.new("Part")
+stragglerChassis.Name = "Chassis"
+stragglerChassis.Anchored = true
+stragglerChassis.Size = Vector3.new(6, 2, 15)
+stragglerChassis.Position = chassis.Position
+stragglerChassis.Parent = straggler
+straggler.PrimaryPart = stragglerChassis
+straggler:SetAttribute("Team", "Enemy")
+straggler:SetAttribute("Destroyed", false)
+straggler.Parent = vehicles
+CollectionService:AddTag(straggler, "HoonangaVehicle")
+
+local strandedIndex = math.floor(-stragglerChassis.Position.Z / chunkLength + 0.5)
+
+-- Drive the player far enough ahead that the distance rule wants the
+-- straggler's chunk gone.
+for step = 1, 12 do
+	chassis.Position = Vector3.new(0, 4, stragglerChassis.Position.Z - step * chunkLength)
+	task.wait(0.6)
+end
+
+local stillThere = false
+local occupancyReported = 0
+for _, chunk in roadChunks:GetChildren() do
+	if chunk:GetAttribute("ChunkIndex") == strandedIndex then
+		stillThere = true
+		occupancyReported = chunk:GetAttribute("Occupancy") or 0
+	end
+end
+
+expect(
+	stillThere,
+	string.format("chunk %d was destroyed while a vehicle was still standing in it", strandedIndex)
+)
+expect(
+	occupancyReported >= 1,
+	string.format(
+		"chunk %d reported occupancy %d, expected at least 1",
+		strandedIndex,
+		occupancyReported
+	)
+)
+
+straggler:Destroy()
 probe:Destroy()
 print(
 	string.format(
-		"[RECYCLE] PASS: %d chunks stayed contiguous over %d chunk-lengths of travel",
+		"[RECYCLE] PASS: %d chunks stayed contiguous over %d chunk-lengths, and an occupied chunk survived the recycler",
 		initialCount,
 		STEPS
 	)
