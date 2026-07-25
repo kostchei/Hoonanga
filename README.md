@@ -67,6 +67,7 @@ scripts/run_studio_test.sh default.project.json scripts/studio_smoke_test.luau s
 | `scripts/studio_smoke_test.luau` | `smoke` | `^\[SMOKE\] PASS: [0-9]` |
 | `scripts/combat_test.luau` | `combat` | `^\[COMBAT\] PASS:` |
 | `scripts/road_coverage_test.luau` | `coverage` | `^\[COVERAGE\] PASS:` |
+| `scripts/road_curve_test.luau` | `curve` | `^\[CURVE\] PASS:` |
 | `scripts/road_recycle_test.luau` | `recycle` | `^\[RECYCLE\] PASS:` |
 | `scripts/road_seed_test.luau` | `seed` | `^\[SEED\] PASS:` |
 | `scripts/concurrent_vehicle_test.luau` | `concurrent` | `^\[CONCURRENT\] PASS:` |

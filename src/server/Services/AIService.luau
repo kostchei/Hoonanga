@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
+local RoadService = require(script.Parent.RoadService)
 local VehicleBuilder = require(script.Parent.VehicleBuilder)
 local VehicleService = require(script.Parent.VehicleService)
 local WeaponService = require(script.Parent.WeaponService)
@@ -42,39 +43,26 @@ local function targetVehicle(): Model?
 	return nil
 end
 
--- Road families vary in drivable width and hazard placement (narrow canyon
--- corridors, mudflat's off-center firm path, the fork's boulder divider),
--- so a fixed steering target would eventually drive the enemy into a wall
--- or a boulder line. RoadService publishes each chunk's safe line as
--- PreferredLaneX for exactly this.
-local function currentChunkLaneX(chassis: BasePart): number
-	local world = Workspace:FindFirstChild("HoonangaWorld")
-	local roadChunks = if world then world:FindFirstChild("RoadChunks") else nil
-	if not roadChunks then
-		return 0
-	end
-
-	local road = WorldConfig.Road
-	local approxIndex = math.floor(-chassis.Position.Z / road.ChunkLength + 0.5)
-	local chunk = roadChunks:FindFirstChild(string.format("Chunk_%04d", approxIndex))
-	if chunk then
-		local laneX = chunk:GetAttribute("PreferredLaneX")
-		if typeof(laneX) == "number" then
-			return laneX
-		end
-	end
-	return 0
-end
+-- How far ahead the AI looks when it has nothing to chase. Long enough to
+-- read a bend and start turning into it, short enough that it does not cut
+-- the corner across the scenery.
+local ROAD_LOOK_AHEAD = 110
 
 -- Returns steer (-1..1) and throttle (-1..1). The enemy hunts the player
 -- rather than driving one-way down the road forever: once the player is
 -- behind it, it commits to a U-turn and comes back for another pass, which
 -- is what makes it an opponent instead of a pace car.
 local function calculateDriving(chassis: BasePart, target: Model?, now: number): (number, number)
-	-- No one to hunt: cruise the chunk's safe line at a relaxed pace.
+	-- No one to hunt: cruise the road's own drivable line at a relaxed pace.
+	-- Road families vary in width and hazard placement (narrow canyon
+	-- corridors, mudflat's off-centre firm path, the fork's boulder divider)
+	-- and the road now bends, so the steering target has to come from the
+	-- road itself rather than from a fixed direction in world space.
 	if not target or not target.PrimaryPart then
-		local lookAhead =
-			Vector3.new(currentChunkLaneX(chassis), chassis.Position.Y, chassis.Position.Z - 90)
+		local lookAhead = RoadService.GetLaneTarget(chassis.Position, ROAD_LOOK_AHEAD)
+		if not lookAhead then
+			return 0, 0.5
+		end
 		local localAhead = chassis.CFrame:PointToObjectSpace(lookAhead)
 		return math.clamp(localAhead.X / 18, -1, 1), 0.5
 	end

@@ -6,6 +6,11 @@
 -- recycler run between them, and after each step checks that the road is
 -- still one contiguous strip and that nothing was deleted out from under the
 -- vehicle.
+--
+-- The probe follows the road's own path rather than marching down world -Z,
+-- because the road bends: a probe driven along an axis would leave the road
+-- entirely within a few chunks and the recycler would be measuring the
+-- progress of something standing in the scenery.
 
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,24 +31,36 @@ task.wait(1)
 
 local chunkLength = WorldConfig.Road.ChunkLength
 local vehicles = Workspace.HoonangaWorld:WaitForChild("Vehicles")
+local roadChunks = Workspace.HoonangaWorld.RoadChunks
 
 -- Stand-in for a player ute: RoadService only needs a tagged Model with a
 -- PrimaryPart on the player team to track progress.
-local probe = Instance.new("Model")
-probe.Name = "RecycleProbe"
-local chassis = Instance.new("Part")
-chassis.Name = "Chassis"
-chassis.Anchored = true
-chassis.Size = Vector3.new(6, 2, 15)
-chassis.Position = Vector3.new(0, 4, 120)
-chassis.Parent = probe
-probe.PrimaryPart = chassis
-probe:SetAttribute("Team", "Player")
-probe:SetAttribute("Destroyed", false)
-probe.Parent = vehicles
-CollectionService:AddTag(probe, "HoonangaVehicle")
+local function makeProbe(name: string, team: string): (Model, BasePart)
+	local probe = Instance.new("Model")
+	probe.Name = name
+	local chassis = Instance.new("Part")
+	chassis.Name = "Chassis"
+	chassis.Anchored = true
+	chassis.Size = Vector3.new(6, 2, 15)
+	chassis.Parent = probe
+	probe.PrimaryPart = chassis
+	probe:SetAttribute("Team", team)
+	probe:SetAttribute("Destroyed", false)
+	probe.Parent = vehicles
+	CollectionService:AddTag(probe, "HoonangaVehicle")
+	return probe, chassis
+end
 
-local roadChunks = Workspace.HoonangaWorld.RoadChunks
+local probe, chassis = makeProbe("RecycleProbe", "Player")
+
+local function chunkByIndex(index: number): Model?
+	for _, chunk in roadChunks:GetChildren() do
+		if chunk:GetAttribute("ChunkIndex") == index then
+			return chunk
+		end
+	end
+	return nil
+end
 
 local function chunkIndices(): { number }
 	local indices = {}
@@ -54,14 +71,33 @@ local function chunkIndices(): { number }
 	return indices
 end
 
+-- Parks the probe a little way inside a chunk, on the road's centre line, so
+-- which chunk it occupies is unambiguous rather than sitting exactly on a
+-- shared seam.
+local function parkInChunk(part: BasePart, chunk: Model)
+	local entry = chunk:GetAttribute("EntryCFrame")
+	expect(typeof(entry) == "CFrame", "chunk has no EntryCFrame to park against")
+	part.CFrame = entry * CFrame.new(0, 4, -40)
+end
+
+parkInChunk(chassis, chunkByIndex(0) :: Model)
+
 -- Simulate a long drive: 60 steps of one chunk each is ~30k studs, well past
 -- the recycle distance, so the recycler runs many times.
 local STEPS = 60
 local initialCount = #roadChunks:GetChildren()
 
 for step = 1, STEPS do
-	local z = 120 - step * chunkLength
-	chassis.Position = Vector3.new(0, 4, z)
+	local target = chunkByIndex(step)
+	expect(
+		target ~= nil,
+		string.format(
+			"step %d: chunk %d does not exist - the road did not extend ahead",
+			step,
+			step
+		)
+	)
+	parkInChunk(chassis, target :: Model)
 	-- The recycler ticks on its own loop; give it room to run.
 	task.wait(0.6)
 
@@ -94,18 +130,10 @@ for step = 1, STEPS do
 
 	-- Nothing deleted beneath the vehicle: the chunk it is standing on, and
 	-- one either side, must still exist.
-	local occupied = math.floor(-z / chunkLength + 0.5)
-	for _, needed in { occupied - 1, occupied, occupied + 1 } do
-		if needed >= 0 and needed <= indices[#indices] and needed >= indices[1] then
-			local found = false
-			for _, existing in indices do
-				if existing == needed then
-					found = true
-					break
-				end
-			end
+	for _, needed in { step - 1, step, step + 1 } do
+		if needed >= indices[1] and needed <= indices[#indices] then
 			expect(
-				found,
+				chunkByIndex(needed) ~= nil,
 				string.format("step %d: chunk %d under/near the vehicle is missing", step, needed)
 			)
 		end
@@ -113,57 +141,59 @@ for step = 1, STEPS do
 
 	-- The road must always extend ahead of the vehicle, or the player drives
 	-- off the end of the world.
-	local furthestAhead = -(indices[#indices] + 0.5) * chunkLength
+	local furthestChunk = chunkByIndex(indices[#indices]) :: Model
+	local roadEnd = furthestChunk:GetAttribute("PathDistance") + chunkLength
+	local progress = RoadService.GetProgress(chassis.Position)
 	expect(
-		furthestAhead < z - chunkLength,
+		roadEnd > progress + chunkLength,
 		string.format(
-			"step %d: road only reaches z=%.0f but vehicle is at z=%.0f",
+			"step %d: road only reaches %.0f studs but vehicle is at %.0f",
 			step,
-			furthestAhead,
-			z
+			roadEnd,
+			progress
 		)
 	)
 end
 
+-- Progress has to be measured along the road, not as a straight line from the
+-- start: on a road that bends back on itself those two numbers diverge
+-- completely, and it is the arc length that decides what gets recycled.
+local drivenDistance = RoadService.GetProgress(chassis.Position)
+expect(
+	drivenDistance > STEPS * chunkLength * 0.9,
+	string.format(
+		"probe reports only %.0f studs of progress after %d chunks of driving",
+		drivenDistance,
+		STEPS
+	)
+)
+
 -- Occupancy (GDD 8.4): the distance rule alone would happily delete a chunk
 -- someone is still standing in. A second vehicle left far behind - a stalled
 -- companion, or a player who doubled back - must keep its chunk alive.
-local straggler = Instance.new("Model")
-straggler.Name = "StragglerProbe"
-local stragglerChassis = Instance.new("Part")
-stragglerChassis.Name = "Chassis"
-stragglerChassis.Anchored = true
-stragglerChassis.Size = Vector3.new(6, 2, 15)
-stragglerChassis.Position = chassis.Position
-stragglerChassis.Parent = straggler
-straggler.PrimaryPart = stragglerChassis
-straggler:SetAttribute("Team", "Enemy")
-straggler:SetAttribute("Destroyed", false)
-straggler.Parent = vehicles
-CollectionService:AddTag(straggler, "HoonangaVehicle")
+local straggler, stragglerChassis = makeProbe("StragglerProbe", "Enemy")
+stragglerChassis.CFrame = chassis.CFrame
 
-local strandedIndex = math.floor(-stragglerChassis.Position.Z / chunkLength + 0.5)
+local strandedChunk = RoadService.GetChunkAt(stragglerChassis.Position)
+expect(strandedChunk ~= nil, "the straggler is not on the road at all")
+local strandedIndex = (strandedChunk :: Model):GetAttribute("ChunkIndex")
 
 -- Drive the player far enough ahead that the distance rule wants the
 -- straggler's chunk gone.
 for step = 1, 12 do
-	chassis.Position = Vector3.new(0, 4, stragglerChassis.Position.Z - step * chunkLength)
+	local target = chunkByIndex(strandedIndex + step)
+	if target then
+		parkInChunk(chassis, target)
+	end
 	task.wait(0.6)
 end
 
-local stillThere = false
-local occupancyReported = 0
-for _, chunk in roadChunks:GetChildren() do
-	if chunk:GetAttribute("ChunkIndex") == strandedIndex then
-		stillThere = true
-		occupancyReported = chunk:GetAttribute("Occupancy") or 0
-	end
-end
-
+local survivor = chunkByIndex(strandedIndex)
 expect(
-	stillThere,
+	survivor ~= nil,
 	string.format("chunk %d was destroyed while a vehicle was still standing in it", strandedIndex)
 )
+local occupancyReported = (survivor :: Model):GetAttribute("Occupancy") or 0
 expect(
 	occupancyReported >= 1,
 	string.format(
@@ -177,8 +207,8 @@ straggler:Destroy()
 probe:Destroy()
 print(
 	string.format(
-		"[RECYCLE] PASS: %d chunks stayed contiguous over %d chunk-lengths, and an occupied chunk survived the recycler",
+		"[RECYCLE] PASS: %d chunks stayed contiguous over %.0f studs of curved road, and an occupied chunk survived the recycler",
 		initialCount,
-		STEPS
+		drivenDistance
 	)
 )

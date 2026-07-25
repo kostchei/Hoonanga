@@ -132,7 +132,11 @@ function HUDController.Start()
 		local surface = vehicle:GetAttribute("ServerSurfaceProfile")
 			or vehicle:GetAttribute("SurfaceProfile")
 			or "UNKNOWN"
-		local distance = math.max(0, -vehicle.PrimaryPart.Position.Z)
+		-- Distance travelled is arc length along the road, published by
+		-- RoadService. It used to be read straight off the world Z axis,
+		-- which stopped meaning anything the moment the road started to bend.
+		local runDistance = vehicle:GetAttribute("RunDistance")
+		local distance = if typeof(runDistance) == "number" then math.max(0, runDistance) else 0
 		local kills = localPlayer:GetAttribute("Kills") or 0
 		local weaponConfig = WeaponState.GetActiveWeapon(vehicle)
 		local loaded = WeaponState.GetLoaded(vehicle, weaponConfig)
