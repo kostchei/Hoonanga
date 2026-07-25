@@ -87,8 +87,34 @@ local MUD_PATCH_SIZE = Vector3.new(17, 0.18, 20)
 local CANYON_WIDTH = 92
 local CANYON_WALL_HEIGHT = 60
 local HIGHWAY_WIDTH = 96
-local HIGHWAY_Y = 22
+local HIGHWAY_RISE = 22
 local HIGHWAY_RAIL_HEIGHT = 3.4
+
+-- Terrain rolls and grades rather than being one dead-flat plane forever.
+-- A chunk is built flat and then rotated as a whole about its own centre,
+-- with the running ground height tracked so each chunk's entry edge starts
+-- exactly where the previous chunk's exit edge finished - the seams stay
+-- flush no matter how the elevation drifts.
+--
+-- Angles are deliberately small. Pitch is free (tracked height keeps seams
+-- flush), but a roll *change* between chunks steps the surface by
+-- halfWidth * tan(delta) out at the chunk edge, so the cap is what keeps
+-- that step driveable. Near the road centre, where the player actually is,
+-- the step is a fraction of a stud.
+local SLOPE_RUN_CHANCE = 0.25
+local MAX_PITCH = math.rad(2)
+local MAX_ROLL = math.rad(2.5)
+-- The band the road is allowed to drift within. The floor matters: a vehicle
+-- below CollisionDamageService's FALL_DESTROY_Y (-80) is destroyed as having
+-- fallen out of the world, so the road descending anywhere near that would
+-- kill the player while they were driving along solid ground. This keeps a
+-- wide margin under the lowest the road can ever get.
+local MIN_ELEVATION = -25
+local MAX_ELEVATION = 65
+-- Pitching a chunk about its centre shortens its footprint along Z by
+-- cos(pitch), which would open a thin gap at the seam. Base terrain slabs
+-- are lengthened so neighbours overlap instead.
+local CHUNK_Z_OVERLAP = 24
 
 -- A fork is one wide chunk split into two parallel, differently-hazarded
 -- lanes with a boulder line down the middle forcing the player to commit to
@@ -110,6 +136,18 @@ local currentFamily = "BoulderPlain"
 local remainingInFamily = 0
 local chunksUntilFork = 0
 local familyCooldowns: { [string]: number } = {}
+-- Height of the road at the seam the next chunk starts from, plus the slope
+-- the current family run is driving at.
+local groundExitY = 0
+local runPitch = 0
+local runRoll = 0
+
+-- Mud and salt are flats. They read as flats, and they are the two surfaces
+-- where the player is already fighting for grip, so tilting them is neither
+-- truthful to the terrain nor kind.
+local function familyIsFlat(family: string): boolean
+	return family == "Mudflat" or family == "RaisedHighway"
+end
 
 -- isFirstOfRun/isLastOfRun let RaisedHighway bracket itself with ramp
 -- chunks: every other family sits at ROAD_Y, but the highway deck sits 22
@@ -142,6 +180,14 @@ local function pickNextFamily(): (string, boolean, boolean)
 					remainingInFamily = math.random(entry.MinRun, entry.MaxRun)
 					if entry.CooldownRuns > 0 then
 						familyCooldowns[entry.Name] = entry.CooldownRuns + 1
+					end
+
+					if familyIsFlat(entry.Name) or math.random() > SLOPE_RUN_CHANCE then
+						runPitch = 0
+						runRoll = 0
+					else
+						runPitch = (math.random() * 2 - 1) * MAX_PITCH
+						runRoll = (math.random() * 2 - 1) * MAX_ROLL
 					end
 					break
 				end
@@ -245,7 +291,7 @@ local function addBaseTerrain(
 	makeSurface(
 		chunk,
 		name,
-		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
+		Vector3.new(road.ChunkWidth, 1, road.ChunkLength + CHUNK_Z_OVERLAP),
 		CFrame.new(0, ROAD_Y, centerZ) * CFrame.new(0, -0.55, 0),
 		profile,
 		variegate(color, index, 0.35),
@@ -272,7 +318,7 @@ local function addGroundRoad(
 	makeSurface(
 		chunk,
 		terrainName,
-		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
+		Vector3.new(road.ChunkWidth, 1, road.ChunkLength + CHUNK_Z_OVERLAP),
 		center * CFrame.new(0, -0.55, 0),
 		terrainProfile,
 		variegate(terrainColor, index, 0.35),
@@ -364,7 +410,8 @@ local function configureSandyDesertChunk(chunk: Model, index: number, centerZ: n
 	-- run reads as varied country rather than one endless tone. The salt is
 	-- also the one fast off-road surface, which changes how the section plays
 	-- and not just how it looks.
-	local isSaltPan = (index // 2) % 2 == 1
+	-- Salt flats are flat, so a graded or cambered run stays all sand.
+	local isSaltPan = (index // 2) % 2 == 1 and runPitch == 0 and runRoll == 0
 	if isSaltPan then
 		addGroundRoad(
 			chunk,
@@ -459,9 +506,9 @@ end
 -- vehicle that drops far enough, no new fall-detection code needed here.
 -- The guard rail is deliberately missing on one side each chunk ("missing
 -- outer barrier" from the chunk idea list) so the exposure is asymmetric.
-local function configureHighwayChunk(chunk: Model, index: number, centerZ: number)
+local function configureHighwayChunk(chunk: Model, index: number, centerZ: number, baseY: number)
 	local road = WorldConfig.Road
-	local center = CFrame.new(0, HIGHWAY_Y, centerZ)
+	local center = CFrame.new(0, baseY + HIGHWAY_RISE, centerZ)
 
 	makeSurface(
 		chunk,
@@ -492,16 +539,21 @@ local function configureHighwayChunk(chunk: Model, index: number, centerZ: numbe
 	chunk:SetAttribute("PreferredLaneX", 0)
 end
 
--- A gentle sloped deck bridging ROAD_Y and HIGHWAY_Y at the start/end of
+-- A gentle sloped deck bridging the ground and the elevated deck at the start/end of
 -- every highway run (GDD 8.3: "vertical changes remain gentle enough for
 -- vehicle suspension unless the chunk is intentionally a ramp"). Travel
 -- runs from a chunk's StartSocket (higher Z) to its EndSocket (lower Z), so
 -- ramping up means low-Z-side is elevated and ramping down means
 -- high-Z-side still is.
-local function configureHighwayRampChunk(chunk: Model, centerZ: number, rampingUp: boolean)
+local function configureHighwayRampChunk(
+	chunk: Model,
+	centerZ: number,
+	rampingUp: boolean,
+	baseY: number
+)
 	local road = WorldConfig.Road
-	local startY = if rampingUp then ROAD_Y else HIGHWAY_Y
-	local endY = if rampingUp then HIGHWAY_Y else ROAD_Y
+	local startY = if rampingUp then baseY else baseY + HIGHWAY_RISE
+	local endY = if rampingUp then baseY + HIGHWAY_RISE else baseY
 	local startPos = Vector3.new(0, startY, centerZ + road.ChunkLength / 2)
 	local endPos = Vector3.new(0, endY, centerZ - road.ChunkLength / 2)
 	local midpoint = (startPos + endPos) / 2
@@ -534,7 +586,7 @@ local function configureMudflatChunk(chunk: Model, index: number, centerZ: numbe
 	makeSurface(
 		chunk,
 		"MudExpanse",
-		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
+		Vector3.new(road.ChunkWidth, 1, road.ChunkLength + CHUNK_Z_OVERLAP),
 		center * CFrame.new(0, -0.5, 0),
 		"Mud",
 		variegate(ROAD_COLORS.Mud, index, 0.25),
@@ -609,17 +661,42 @@ local function configureForkChunk(chunk: Model, index: number, centerZ: number)
 	chunk:SetAttribute("PreferredLaneX", laneOffset)
 end
 
+-- Chunks are built flat around (0, ROAD_Y, centerZ) and then tilted as a
+-- whole. Rotating about the chunk's own centre means the entry edge drops by
+-- the same amount the exit edge rises, so placing the centre at
+-- previousExit + sin(pitch) * halfLength lands the entry edge exactly on the
+-- previous chunk's exit edge and the seam stays flush.
+local function applyChunkSlope(chunk: Model, centerZ: number, pitch: number, roll: number): number
+	local halfLength = WorldConfig.Road.ChunkLength / 2
+	local rise = math.sin(pitch) * halfLength
+	local centerY = groundExitY + rise
+
+	if pitch ~= 0 or roll ~= 0 then
+		chunk.WorldPivot = CFrame.new(0, ROAD_Y, centerZ)
+		chunk:PivotTo(CFrame.new(0, centerY, centerZ) * CFrame.Angles(pitch, 0, roll))
+	elseif centerY ~= ROAD_Y then
+		chunk.WorldPivot = CFrame.new(0, ROAD_Y, centerZ)
+		chunk:PivotTo(CFrame.new(0, centerY, centerZ))
+	end
+
+	return centerY + rise
+end
+
 local function configureChunk(chunk: Model, index: number)
 	local road = WorldConfig.Road
 	local centerZ = -(index * road.ChunkLength)
 	chunk.Name = string.format("Chunk_%04d", index)
 	chunk:SetAttribute("ChunkIndex", index)
 
-	-- A fork mid-highway-run would sit at ROAD_Y between HIGHWAY_Y chunks -
+	-- A fork mid-highway-run would sit at ground level between deck chunks -
 	-- the same cliff problem the ramp chunks exist to avoid. currentFamily
 	-- still reads "RaisedHighway" for every chunk of an in-progress run
 	-- right up until pickNextFamily next advances it, so this defers the
 	-- fork rather than dropping it into the middle of the highway.
+	-- The highway builds its own absolute heights off groundExitY, so it opts
+	-- out of the generic tilt; everything else is built flat and then tilted.
+	local pitch, roll = runPitch, runRoll
+
 	if chunksUntilFork <= 0 and currentFamily ~= "RaisedHighway" then
 		chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 		chunk:SetAttribute("RoadFamily", "Fork")
@@ -637,18 +714,34 @@ local function configureChunk(chunk: Model, index: number)
 		elseif family == "Mudflat" then
 			configureMudflatChunk(chunk, index, centerZ)
 		elseif family == "RaisedHighway" then
+			pitch, roll = 0, 0
 			if isFirstOfRun then
-				configureHighwayRampChunk(chunk, centerZ, true)
+				configureHighwayRampChunk(chunk, centerZ, true, groundExitY)
 			elseif isLastOfRun then
-				configureHighwayRampChunk(chunk, centerZ, false)
+				configureHighwayRampChunk(chunk, centerZ, false, groundExitY)
 			else
-				configureHighwayChunk(chunk, index, centerZ)
+				configureHighwayChunk(chunk, index, centerZ, groundExitY)
 			end
 		else
 			configureBoulderPlainChunk(chunk, index, centerZ)
 		end
 	end
 
+	if not (currentFamily == "RaisedHighway" and chunk:GetAttribute("RoadFamily") ~= "Fork") then
+		-- Keep the running elevation inside its band. Level off on reaching
+		-- the limit rather than reversing the grade: flipping the sign made
+		-- the road sawtooth up and down every chunk once it saturated,
+		-- which reads as a ramp field rather than rolling country.
+		local projected = groundExitY + math.sin(pitch) * road.ChunkLength
+		if projected > MAX_ELEVATION or projected < MIN_ELEVATION then
+			local limit = if projected > MAX_ELEVATION then MAX_ELEVATION else MIN_ELEVATION
+			pitch = math.asin(math.clamp((limit - groundExitY) / road.ChunkLength, -1, 1))
+			runPitch = 0
+		end
+		groundExitY = applyChunkSlope(chunk, centerZ, pitch, roll)
+	end
+
+	chunk:SetAttribute("GroundExitY", groundExitY)
 	addSockets(chunk, centerZ, road.ChunkLength)
 end
 
@@ -755,6 +848,11 @@ function RoadService.Start()
 	currentFamily = "BoulderPlain"
 	remainingInFamily = math.random(4, 8)
 	familyCooldowns = {}
+	-- The opening stretch is flat and at ground level so the spawn area is
+	-- predictable.
+	groundExitY = 0
+	runPitch = 0
+	runRoll = 0
 	chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 	nextChunkIndex = WorldConfig.Road.InitialChunkCount
 	for index = 0, WorldConfig.Road.InitialChunkCount - 1 do

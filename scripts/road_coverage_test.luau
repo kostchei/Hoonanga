@@ -26,6 +26,8 @@ RoadService.Start()
 task.wait(1)
 
 local halfWidth = WorldConfig.Road.ChunkWidth / 2
+-- Roughly the good-ground road strip, where the player actually drives.
+local ROAD_SURFACE_HALF_WIDTH = 20
 -- Slabs are axis-aligned and butt against each other, so allow a hairline
 -- tolerance rather than demanding exact float equality.
 local TOLERANCE = 0.05
@@ -85,9 +87,86 @@ for _, chunk in Workspace.HoonangaWorld.RoadChunks:GetChildren() do
 	end
 end
 
+-- Seam continuity. Chunks are tilted independently, so a grade or camber
+-- change between neighbours steps the surface at their shared edge. A step
+-- near the centre line is a wall the player drives into at speed; far out in
+-- the runoff a small one is just a bump. This samples across the width and
+-- holds the centre to a much tighter bound than the edges.
+local MAX_STEP_AT_ROAD = 1.5
+local MAX_STEP_AT_EDGE = 6
+
+local ordered = {}
+for _, chunk in Workspace.HoonangaWorld.RoadChunks:GetChildren() do
+	table.insert(ordered, chunk)
+end
+table.sort(ordered, function(a, b)
+	return (a:GetAttribute("ChunkIndex") or 0) < (b:GetAttribute("ChunkIndex") or 0)
+end)
+
+local function sampleHeight(chunk: Model, x: number, z: number): number?
+	local best = nil
+	for _, part in chunk:GetDescendants() do
+		if part:IsA("BasePart") and part:GetAttribute("SurfaceProfile") then
+			local localPoint = part.CFrame:PointToObjectSpace(Vector3.new(x, 0, z))
+			if
+				math.abs(localPoint.X) <= part.Size.X / 2
+				and math.abs(localPoint.Z) <= part.Size.Z / 2
+			then
+				local surfaceY = (part.CFrame * CFrame.new(
+					localPoint.X,
+					part.Size.Y / 2,
+					localPoint.Z
+				)).Y
+				best = if best == nil then surfaceY else math.max(best, surfaceY)
+			end
+		end
+	end
+	return best
+end
+
+local worstStep = 0
+for i = 1, #ordered - 1 do
+	local a, b = ordered[i], ordered[i + 1]
+	if
+		a:GetAttribute("RoadFamily") ~= "RaisedHighway"
+		and b:GetAttribute("RoadFamily") ~= "RaisedHighway"
+	then
+		local seamZ = -((a:GetAttribute("ChunkIndex") + 0.5) * WorldConfig.Road.ChunkLength)
+		for x = -halfWidth + 2, halfWidth - 2, 10 do
+			local ya = sampleHeight(a, x, seamZ + 1)
+			local yb = sampleHeight(b, x, seamZ - 1)
+			if ya and yb then
+				local step = math.abs(ya - yb)
+				worstStep = math.max(worstStep, step)
+				local allowed = if math.abs(x) <= ROAD_SURFACE_HALF_WIDTH
+					then MAX_STEP_AT_ROAD
+					else MAX_STEP_AT_EDGE
+				if step > allowed then
+					table.insert(
+						failures,
+						string.format(
+							"seam between chunks %s/%s steps %.1f studs at x=%.0f (limit %.1f)",
+							tostring(a:GetAttribute("ChunkIndex")),
+							tostring(b:GetAttribute("ChunkIndex")),
+							step,
+							x,
+							allowed
+						)
+					)
+				end
+			end
+		end
+	end
+end
+
 for _, failure in failures do
 	warn("[COVERAGE] " .. failure)
 end
 
-expect(#failures == 0, string.format("%d chunk(s) have holes - see warnings above", #failures))
-print("[COVERAGE] PASS: every ground-level chunk is solid across its full width")
+expect(#failures == 0, string.format("%d problem(s) found - see warnings above", #failures))
+print(
+	string.format(
+		"[COVERAGE] PASS: chunks solid across full width, worst seam step %.2f studs",
+		worstStep
+	)
+)
