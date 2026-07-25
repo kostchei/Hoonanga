@@ -19,6 +19,7 @@ export type PlayerProfile = {
 
 local DATASTORE_KEY = "HoonangaPlayerData_v1"
 local profiles: { [Player]: PlayerProfile } = {}
+local lastSavedAt: { [number]: number } = {}
 
 local function createDefaultProfile(): PlayerProfile
 	return {
@@ -47,7 +48,7 @@ function ProgressionService.Start()
 
 	Players.PlayerAdded:Connect(function(player)
 		local defaultProfile = createDefaultProfile()
-		if dataStore then
+		if dataStore and player.UserId > 0 then
 			local ok, saved = pcall(function()
 				return dataStore:GetAsync(tostring(player.UserId))
 			end)
@@ -66,10 +67,15 @@ function ProgressionService.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		local profile = profiles[player]
-		if profile and dataStore then
-			pcall(function()
-				dataStore:SetAsync(tostring(player.UserId), profile)
-			end)
+		if profile and dataStore and player.UserId > 0 then
+			local now = os.time()
+			local lastSave = lastSavedAt[player.UserId] or 0
+			if now - lastSave >= 6 then
+				lastSavedAt[player.UserId] = now
+				pcall(function()
+					dataStore:SetAsync(tostring(player.UserId), profile)
+				end)
+			end
 		end
 		profiles[player] = nil
 	end)
@@ -79,9 +85,11 @@ function ProgressionService.Start()
 			return
 		end
 		for player, profile in profiles do
-			pcall(function()
-				dataStore:SetAsync(tostring(player.UserId), profile)
-			end)
+			if player.UserId > 0 then
+				pcall(function()
+					dataStore:SetAsync(tostring(player.UserId), profile)
+				end)
+			end
 		end
 	end)
 

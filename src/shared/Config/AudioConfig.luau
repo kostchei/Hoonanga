@@ -28,13 +28,13 @@ local SOUND_EFFECTS: { [string]: SoundEffect } = {
 	},
 	LowFuelAlarm = {
 		Id = "LowFuelAlarm",
-		AssetId = "rbxassetid://9114226000",
+		AssetId = "rbxassetid://138090596",
 		Volume = 0.6,
 		Pitch = 1.2,
 	},
 	PickupCollected = {
 		Id = "PickupCollected",
-		AssetId = "rbxassetid://9114227000",
+		AssetId = "rbxassetid://131961136",
 		Volume = 0.6,
 		Pitch = 1.1,
 	},
