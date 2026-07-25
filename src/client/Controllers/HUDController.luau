@@ -118,6 +118,21 @@ function HUDController.Start()
 	gui.ResetOnSpawn = false
 	gui.Parent = localPlayer:WaitForChild("PlayerGui")
 
+	local versionTag = Instance.new("TextLabel")
+	versionTag.Name = "VersionTag"
+	versionTag.AnchorPoint = Vector2.new(1, 0)
+	versionTag.Position = UDim2.new(1, -22, 0, 22)
+	versionTag.Size = UDim2.fromOffset(200, 24)
+	versionTag.BackgroundTransparency = 0.3
+	versionTag.BackgroundColor3 = Color3.fromRGB(15, 18, 19)
+	versionTag.BorderSizePixel = 0
+	versionTag.Font = Enum.Font.GothamBold
+	versionTag.TextColor3 = Color3.fromRGB(255, 103, 65)
+	versionTag.TextSize = 13
+	versionTag.TextXAlignment = Enum.TextXAlignment.Center
+	versionTag.Text = "Hoonanga v1.6.0 [M6]"
+	versionTag.Parent = gui
+
 	local crosshair = Instance.new("Frame")
 	crosshair.Name = "Crosshair"
 	crosshair.AnchorPoint = Vector2.new(0.5, 0.5)
