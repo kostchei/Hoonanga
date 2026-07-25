@@ -27,9 +27,12 @@ local ROAD_COLORS = {
 -- implemented yet - every chunk is still a straight corridor along Z - so
 -- families are differentiated by width, surface, and hazards rather than
 -- path shape for now.
-local ROAD_FAMILIES = { "StonyDesert", "Canyon", "Mudflat" }
+local ROAD_FAMILIES = { "StonyDesert", "Canyon", "Mudflat", "RaisedHighway" }
 local CANYON_WIDTH = 34
 local CANYON_WALL_HEIGHT = 60
+local HIGHWAY_WIDTH = 44
+local HIGHWAY_Y = 22
+local HIGHWAY_RAIL_HEIGHT = 3.4
 
 -- A fork is one wide chunk split into two parallel, differently-hazarded
 -- lanes with a boulder line down the middle forcing the player to commit to
@@ -40,8 +43,8 @@ local CANYON_WALL_HEIGHT = 60
 -- chunk model, and reconverges trivially since the lanes never physically
 -- separated.
 local FORK_LANE_WIDTH = 38
-local FORK_MIN_INTERVAL = 10
-local FORK_MAX_INTERVAL = 16
+local FORK_MIN_INTERVAL = 6
+local FORK_MAX_INTERVAL = 10
 
 local chunks: { ChunkRecord } = {}
 local chunkFolder: Folder
@@ -51,22 +54,28 @@ local currentFamily = "StonyDesert"
 local remainingInFamily = 0
 local chunksUntilFork = 0
 
-local function pickNextFamily(): string
-	if remainingInFamily > 0 then
-		remainingInFamily -= 1
-		return currentFamily
-	end
-
-	local candidates = {}
-	for _, family in ROAD_FAMILIES do
-		if family ~= currentFamily then
-			table.insert(candidates, family)
+-- isFirstOfRun/isLastOfRun let RaisedHighway bracket itself with ramp
+-- chunks: every other family sits at ROAD_Y, but the highway deck sits 22
+-- studs up, so a bare family transition would leave the road ending in a
+-- sheer cliff instead of a drivable slope.
+local function pickNextFamily(): (string, boolean, boolean)
+	local isFirstOfRun = false
+	if remainingInFamily <= 0 then
+		local candidates = {}
+		for _, family in ROAD_FAMILIES do
+			if family ~= currentFamily then
+				table.insert(candidates, family)
+			end
 		end
+
+		currentFamily = candidates[math.random(1, #candidates)]
+		remainingInFamily = math.random(4, 8)
+		isFirstOfRun = true
 	end
 
-	currentFamily = candidates[math.random(1, #candidates)]
-	remainingInFamily = math.random(4, 8) - 1
-	return currentFamily
+	remainingInFamily -= 1
+	local isLastOfRun = remainingInFamily <= 0
+	return currentFamily, isFirstOfRun, isLastOfRun
 end
 
 local function makeSurface(
@@ -247,6 +256,75 @@ local function configureCanyonChunk(chunk: Model, index: number, centerZ: number
 	chunk:SetAttribute("PreferredLaneX", 0)
 end
 
+-- Elevated straight with an exposed edge (GDD 9.1): the road is a floating
+-- strip with nothing beneath it off to the sides, so driving (or being
+-- rammed) off either edge is a genuine fall - CollisionDamageService's
+-- existing RoadLethalZone/FALL_DESTROY_Y handling already destroys a
+-- vehicle that drops far enough, no new fall-detection code needed here.
+-- The guard rail is deliberately missing on one side each chunk ("missing
+-- outer barrier" from the chunk idea list) so the exposure is asymmetric.
+local function configureHighwayChunk(chunk: Model, index: number, centerZ: number)
+	local road = WorldConfig.Road
+	local center = CFrame.new(0, HIGHWAY_Y, centerZ)
+
+	makeSurface(
+		chunk,
+		"HighwayDeck",
+		Vector3.new(HIGHWAY_WIDTH, 1.4, road.ChunkLength),
+		center,
+		"Asphalt",
+		ROAD_COLORS.Asphalt,
+		Enum.Material.Asphalt
+	)
+
+	local railedSide = if index % 2 == 0 then -1 else 1
+	local rail = Instance.new("Part")
+	rail.Name = "HighwayGuardRail"
+	rail.Anchored = true
+	rail.Size = Vector3.new(1.6, HIGHWAY_RAIL_HEIGHT, road.ChunkLength)
+	rail.CFrame = center
+		* CFrame.new(railedSide * (HIGHWAY_WIDTH / 2 - 0.8), HIGHWAY_RAIL_HEIGHT / 2 + 0.7, 0)
+	rail.Color = Color3.fromRGB(150, 150, 145)
+	rail.Material = Enum.Material.Metal
+	rail.Parent = chunk
+	CollectionService:AddTag(rail, "RoadHardBoundary")
+
+	if index % 4 == 3 then
+		addFuelPickup(chunk, center * CFrame.new(-railedSide * (HIGHWAY_WIDTH / 2 - 6), 2.25, -100))
+	end
+
+	chunk:SetAttribute("PreferredLaneX", 0)
+end
+
+-- A gentle sloped deck bridging ROAD_Y and HIGHWAY_Y at the start/end of
+-- every highway run (GDD 8.3: "vertical changes remain gentle enough for
+-- vehicle suspension unless the chunk is intentionally a ramp"). Travel
+-- runs from a chunk's StartSocket (higher Z) to its EndSocket (lower Z), so
+-- ramping up means low-Z-side is elevated and ramping down means
+-- high-Z-side still is.
+local function configureHighwayRampChunk(chunk: Model, centerZ: number, rampingUp: boolean)
+	local road = WorldConfig.Road
+	local startY = if rampingUp then ROAD_Y else HIGHWAY_Y
+	local endY = if rampingUp then HIGHWAY_Y else ROAD_Y
+	local startPos = Vector3.new(0, startY, centerZ + road.ChunkLength / 2)
+	local endPos = Vector3.new(0, endY, centerZ - road.ChunkLength / 2)
+	local midpoint = (startPos + endPos) / 2
+	local slopeLength = (endPos - startPos).Magnitude
+
+	local ramp = Instance.new("Part")
+	ramp.Name = "HighwayRamp"
+	ramp.Anchored = true
+	ramp.Size = Vector3.new(HIGHWAY_WIDTH, 1.4, slopeLength)
+	ramp.CFrame = CFrame.new(midpoint, endPos)
+	ramp.Color = ROAD_COLORS.Asphalt
+	ramp.Material = Enum.Material.Asphalt
+	ramp:SetAttribute("SurfaceProfile", "Asphalt")
+	ramp.Parent = chunk
+	CollectionService:AddTag(ramp, "RoadSurface")
+
+	chunk:SetAttribute("PreferredLaneX", 0)
+end
+
 -- Wide, mostly-mud expanse with a firmer path threaded through it (GDD 9.3):
 -- straying off the path costs grip and builds BogLevel through the existing
 -- VehiclePhysics surface-profile handling, no new physics code needed.
@@ -326,18 +404,33 @@ local function configureChunk(chunk: Model, index: number)
 	chunk.Name = string.format("Chunk_%04d", index)
 	chunk:SetAttribute("ChunkIndex", index)
 
-	if chunksUntilFork <= 0 then
+	-- A fork mid-highway-run would sit at ROAD_Y between HIGHWAY_Y chunks -
+	-- the same cliff problem the ramp chunks exist to avoid. currentFamily
+	-- still reads "RaisedHighway" for every chunk of an in-progress run
+	-- right up until pickNextFamily next advances it, so this defers the
+	-- fork rather than dropping it into the middle of the highway.
+	if chunksUntilFork <= 0 and currentFamily ~= "RaisedHighway" then
 		chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 		chunk:SetAttribute("RoadFamily", "Fork")
 		configureForkChunk(chunk, centerZ)
 	else
-		chunksUntilFork -= 1
-		local family = pickNextFamily()
+		if chunksUntilFork > 0 then
+			chunksUntilFork -= 1
+		end
+		local family, isFirstOfRun, isLastOfRun = pickNextFamily()
 		chunk:SetAttribute("RoadFamily", family)
 		if family == "Canyon" then
 			configureCanyonChunk(chunk, index, centerZ)
 		elseif family == "Mudflat" then
 			configureMudflatChunk(chunk, index, centerZ)
+		elseif family == "RaisedHighway" then
+			if isFirstOfRun then
+				configureHighwayRampChunk(chunk, centerZ, true)
+			elseif isLastOfRun then
+				configureHighwayRampChunk(chunk, centerZ, false)
+			else
+				configureHighwayChunk(chunk, index, centerZ)
+			end
 		else
 			configureStonyDesertChunk(chunk, index, centerZ)
 		end

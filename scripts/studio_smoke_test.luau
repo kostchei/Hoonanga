@@ -82,7 +82,7 @@ expect(
 )
 expect(
 	seenFamilies.Fork == true,
-	"no fork chunk was generated within the first 21 chunks (fork interval is 10-16)"
+	"no fork chunk was generated within the first 21 chunks (fork interval is 6-10)"
 )
 
 local forkChunk
