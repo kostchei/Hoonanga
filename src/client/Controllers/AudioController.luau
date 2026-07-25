@@ -14,6 +14,12 @@ local playAudioRemote = remotesFolder:WaitForChild("PlayAudioEffect") :: RemoteE
 local engineSound: Sound? = nil
 local activeVehicle: Model? = nil
 
+local function safePlaySound(sound: Sound)
+	pcall(function()
+		sound:Play()
+	end)
+end
+
 local AudioController = {}
 
 function AudioController.Start()
@@ -45,7 +51,7 @@ function AudioController.Start()
 				sound:Destroy()
 			end)
 		end
-		sound:Play()
+		safePlaySound(sound)
 	end)
 
 	RunService.RenderStepped:Connect(function()
@@ -70,9 +76,9 @@ function AudioController.Start()
 				sound.Looped = true
 				sound.Volume = 0.45
 				sound.Pitch = AudioConfig.EngineMinPitch
-				sound.SoundId = "rbxassetid://9114228000"
+				sound.SoundId = AudioConfig.EngineSoundAssetId or "rbxassetid://1847636603"
 				sound.Parent = vehicle.PrimaryPart
-				sound:Play()
+				safePlaySound(sound)
 				engineSound = sound
 			end
 		end
@@ -94,7 +100,7 @@ function AudioController.PlayLocalEffect(effectId: string)
 		sound.Volume = effect.Volume
 		sound.Pitch = effect.Pitch
 		sound.Parent = Workspace
-		sound:Play()
+		safePlaySound(sound)
 		sound.Ended:Connect(function()
 			sound:Destroy()
 		end)

@@ -10,19 +10,19 @@ export type SoundEffect = {
 local SOUND_EFFECTS: { [string]: SoundEffect } = {
 	MachineGunFire = {
 		Id = "MachineGunFire",
-		AssetId = "rbxassetid://9114223179",
+		AssetId = "rbxassetid://130113322",
 		Volume = 0.5,
 		Pitch = 1.0,
 	},
 	Explosion = {
 		Id = "Explosion",
-		AssetId = "rbxassetid://9114224000",
+		AssetId = "rbxassetid://142070127",
 		Volume = 0.8,
 		Pitch = 0.9,
 	},
 	VehicleImpact = {
 		Id = "VehicleImpact",
-		AssetId = "rbxassetid://9114225000",
+		AssetId = "rbxassetid://260430079",
 		Volume = 0.7,
 		Pitch = 1.0,
 	},
@@ -41,6 +41,7 @@ local SOUND_EFFECTS: { [string]: SoundEffect } = {
 }
 
 return {
+	EngineSoundAssetId = "rbxassetid://1847636603",
 	Effects = SOUND_EFFECTS,
 	EngineMinPitch = 0.75,
 	EngineMaxPitch = 2.2,
