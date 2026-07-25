@@ -64,15 +64,17 @@ local function awardKill(sourceVehicle: Model?, targetVehicle: Model)
 	)
 end
 
-local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
+-- Shared by both run-ending paths: a violent kill (destroyVehicle) and a
+-- non-violent one (strandVehicle, for running out of fuel - GDD 4.2 lists
+-- "elimination, fuel loss, or voluntary extraction" as distinct ways a run
+-- ends, not fuel loss folded into elimination). Both need the same
+-- Destroyed flag, character-respawn trigger, and eventual cleanup; only the
+-- combat one adds hull loss, an explosion, and scorch marks.
+local function endRun(vehicle: Model): boolean
 	if vehicle:GetAttribute("Destroyed") then
-		return
+		return false
 	end
-
 	vehicle:SetAttribute("Destroyed", true)
-	vehicle:SetAttribute("Hull", 0)
-	warn(string.format("[Hoonanga] Destroying %s", vehicle.Name))
-	awardKill(sourceVehicle, vehicle)
 	VehiclePhysics.Reset(vehicle)
 
 	local seat = vehicle:FindFirstChild("DriverSeat")
@@ -88,6 +90,19 @@ local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
 			humanoid.Health = 0
 		end
 	end
+
+	Debris:AddItem(vehicle, 8)
+	return true
+end
+
+local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
+	if not endRun(vehicle) then
+		return
+	end
+
+	vehicle:SetAttribute("Hull", 0)
+	warn(string.format("[Hoonanga] Destroying %s", vehicle.Name))
+	awardKill(sourceVehicle, vehicle)
 
 	local chassis = vehicle.PrimaryPart
 	if chassis then
@@ -107,8 +122,13 @@ local function destroyVehicle(vehicle: Model, sourceVehicle: Model?)
 			descendant.Color = descendant.Color:Lerp(Color3.fromRGB(35, 30, 27), 0.55)
 		end
 	end
+end
 
-	Debris:AddItem(vehicle, 8)
+local function strandVehicle(vehicle: Model)
+	if not endRun(vehicle) then
+		return
+	end
+	warn(string.format("[Hoonanga] %s ran out of fuel and was stranded", vehicle.Name))
 end
 
 local function applyHullDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
@@ -169,6 +189,10 @@ end
 
 function CombatService.DestroyVehicle(vehicle: Model, sourceVehicle: Model?)
 	destroyVehicle(vehicle, sourceVehicle)
+end
+
+function CombatService.StrandVehicle(vehicle: Model)
+	strandVehicle(vehicle)
 end
 
 local function fireRay(

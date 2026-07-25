@@ -80,6 +80,9 @@ function RunResultController.Start()
 		if vehicle:GetAttribute("Destroyed") then
 			if resultShownFor ~= vehicle then
 				resultShownFor = vehicle
+				title.Text = if vehicle:GetAttribute("OutOfFuel") == true
+					then "OUT OF FUEL"
+					else "RUN OVER"
 				stats.Text = string.format(
 					"Distance: %.2f km\nKills: %d",
 					lastDistance / 1000,

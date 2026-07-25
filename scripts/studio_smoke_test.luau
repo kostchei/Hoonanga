@@ -201,6 +201,24 @@ expect(
 	"operator health reaching zero did not destroy the vehicle"
 )
 
+local strandTest = VehicleBuilder.CreateUte(
+	vehicles,
+	"SmokeStrandTest",
+	CFrame.new(0, 4, 400),
+	Color3.new(1, 1, 1)
+)
+strandTest:SetAttribute("OutOfFuel", true)
+CombatService.StrandVehicle(strandTest)
+expect(
+	strandTest:GetAttribute("Destroyed") == true,
+	"stranding a vehicle did not mark it destroyed"
+)
+expect(
+	strandTest:GetAttribute("Hull") == 100,
+	"stranding a vehicle incorrectly damaged its hull like a combat kill"
+)
+strandTest:Destroy()
+
 print(
 	string.format(
 		"[SMOKE] PASS: %d chunks, %d vehicle(s), asphalt/mud/oil generated",
