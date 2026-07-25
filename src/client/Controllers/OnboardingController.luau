@@ -3,12 +3,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 
 local localPlayer = Players.LocalPlayer
 local activeStepIndex = 1
 local currentStep: TutorialConfig.TutorialStep? = TutorialConfig.Steps[1]
+local isDismissed = false
 
 local OnboardingController = {}
 
@@ -24,9 +26,9 @@ function OnboardingController.Start()
 	panel.Name = "TutorialBanner"
 	panel.AnchorPoint = Vector2.new(0.5, 0)
 	panel.Position = UDim2.new(0.5, 0, 0, 80)
-	panel.Size = UDim2.fromOffset(480, 60)
+	panel.Size = UDim2.fromOffset(500, 64)
 	panel.BackgroundColor3 = Color3.fromRGB(15, 18, 19)
-	panel.BackgroundTransparency = 0.2
+	panel.BackgroundTransparency = 0.15
 	panel.BorderSizePixel = 0
 	panel.Parent = gui
 
@@ -37,7 +39,7 @@ function OnboardingController.Start()
 	title.TextColor3 = Color3.fromRGB(255, 103, 65)
 	title.BackgroundTransparency = 1
 	title.Position = UDim2.fromOffset(12, 6)
-	title.Size = UDim2.fromOffset(456, 20)
+	title.Size = UDim2.fromOffset(400, 20)
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = panel
 
@@ -48,14 +50,51 @@ function OnboardingController.Start()
 	msg.TextColor3 = Color3.fromRGB(238, 220, 189)
 	msg.BackgroundTransparency = 1
 	msg.Position = UDim2.fromOffset(12, 28)
-	msg.Size = UDim2.fromOffset(456, 26)
+	msg.Size = UDim2.fromOffset(400, 28)
 	msg.TextXAlignment = Enum.TextXAlignment.Left
 	msg.Parent = panel
 
+	local closeButton = Instance.new("TextButton")
+	closeButton.Name = "CloseButton"
+	closeButton.Text = "X CLOSE [N]"
+	closeButton.Font = Enum.Font.GothamBold
+	closeButton.TextSize = 11
+	closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeButton.BackgroundColor3 = Color3.fromRGB(184, 73, 42)
+	closeButton.BorderSizePixel = 0
+	closeButton.Position = UDim2.fromOffset(418, 12)
+	closeButton.Size = UDim2.fromOffset(70, 40)
+	closeButton.Parent = panel
+
+	local function dismissTutorial()
+		isDismissed = true
+		currentStep = nil
+		gui.Enabled = false
+	end
+
+	closeButton.MouseButton1Click:Connect(dismissTutorial)
+
+	UserInputService.InputBegan:Connect(function(input, gpe)
+		if gpe or isDismissed then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.N then
+			dismissTutorial()
+		end
+	end)
+
 	local function updateStepUI()
+		if isDismissed then
+			gui.Enabled = false
+			return
+		end
 		if currentStep then
-			title.Text =
-				string.format("TUTORIAL: %s [%s]", currentStep.Title, currentStep.ActionKeyHint)
+			title.Text = string.format(
+				"TUTORIAL (%d/5): %s [%s]",
+				activeStepIndex,
+				currentStep.Title,
+				currentStep.ActionKeyHint
+			)
 			msg.Text = currentStep.Message
 			gui.Enabled = true
 		else
@@ -66,6 +105,10 @@ function OnboardingController.Start()
 	updateStepUI()
 
 	RunService.RenderStepped:Connect(function()
+		if isDismissed then
+			return
+		end
+
 		local character = localPlayer.Character
 		local seat = if character
 			then character:FindFirstChildOfClass("Humanoid") and (character:FindFirstChildOfClass(
@@ -95,8 +138,7 @@ function OnboardingController.Start()
 				currentStep = TutorialConfig.Steps[5]
 				updateStepUI()
 			elseif activeStepIndex == 5 and dist > 2500 then
-				currentStep = nil
-				updateStepUI()
+				dismissTutorial()
 			end
 		end
 	end)

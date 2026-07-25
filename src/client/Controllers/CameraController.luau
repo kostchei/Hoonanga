@@ -79,18 +79,9 @@ local function refreshCameraMode()
 	if activeAttachment then
 		hideFirstPersonObstructions(activeAttachment)
 		camera.CameraType = Enum.CameraType.Scriptable
-		if isMouseUnlocked then
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-			UserInputService.MouseIconEnabled = true
-		else
-			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-			UserInputService.MouseIconEnabled = false
-		end
 	else
 		restoreHiddenParts()
 		camera.CameraType = Enum.CameraType.Custom
-		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		UserInputService.MouseIconEnabled = true
 	end
 end
 
@@ -104,7 +95,6 @@ function CameraController.Start()
 			or input.KeyCode == Enum.KeyCode.M
 		then
 			isMouseUnlocked = not isMouseUnlocked
-			refreshCameraMode()
 		end
 	end)
 
@@ -132,6 +122,19 @@ function CameraController.Start()
 				refreshCameraMode()
 			end
 
+			if activeAttachment then
+				if isMouseUnlocked then
+					UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+					UserInputService.MouseIconEnabled = true
+				else
+					UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+					UserInputService.MouseIconEnabled = false
+				end
+			else
+				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+				UserInputService.MouseIconEnabled = true
+			end
+
 			local attachment = activeAttachment
 			if not attachment or not attachment.Parent then
 				return
@@ -152,7 +155,10 @@ end
 
 function CameraController.SetMouseUnlocked(unlocked: boolean)
 	isMouseUnlocked = unlocked
-	refreshCameraMode()
+end
+
+function CameraController.IsMouseUnlocked(): boolean
+	return isMouseUnlocked
 end
 
 return CameraController
