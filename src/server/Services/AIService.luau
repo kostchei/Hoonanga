@@ -25,12 +25,36 @@ local function targetVehicle(): Model?
 	return nil
 end
 
+-- Road families vary in drivable width and hazard placement (narrow canyon
+-- corridors, mudflat's off-center firm path, the fork's boulder divider),
+-- so a fixed steering target would eventually drive the enemy into a wall
+-- or a boulder line. RoadService publishes each chunk's safe line as
+-- PreferredLaneX for exactly this.
+local function currentChunkLaneX(chassis: BasePart): number
+	local world = Workspace:FindFirstChild("HoonangaWorld")
+	local roadChunks = if world then world:FindFirstChild("RoadChunks") else nil
+	if not roadChunks then
+		return 0
+	end
+
+	local road = WorldConfig.Road
+	local approxIndex = math.floor(-chassis.Position.Z / road.ChunkLength + 0.5)
+	local chunk = roadChunks:FindFirstChild(string.format("Chunk_%04d", approxIndex))
+	if chunk then
+		local laneX = chunk:GetAttribute("PreferredLaneX")
+		if typeof(laneX) == "number" then
+			return laneX
+		end
+	end
+	return 0
+end
+
 local function calculateSteering(chassis: BasePart, target: Model?): number
-	local desiredX = 10
+	local desiredX = currentChunkLaneX(chassis)
 	if target and target.PrimaryPart then
 		local separation = target.PrimaryPart.Position.Z - chassis.Position.Z
 		if math.abs(separation) < 70 then
-			desiredX = if target.PrimaryPart.Position.X >= chassis.Position.X then -12 else 12
+			desiredX += if target.PrimaryPart.Position.X >= chassis.Position.X then -12 else 12
 		end
 	end
 

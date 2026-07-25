@@ -200,6 +200,8 @@ local function configureStonyDesertChunk(chunk: Model, index: number, centerZ: n
 		)
 		addBoulder(chunk, Vector3.new(baseX - side * 7, 1.2, centerZ + 145 - side * 18), 0.55)
 	end
+
+	chunk:SetAttribute("PreferredLaneX", 0)
 end
 
 -- Narrow choke-point corridor with real wall collision geometry (GDD 9.2):
@@ -241,6 +243,8 @@ local function configureCanyonChunk(chunk: Model, index: number, centerZ: number
 	if index % 4 == 3 then
 		addFuelPickup(chunk, center * CFrame.new(-pinchSide * 8, 2.25, -120))
 	end
+
+	chunk:SetAttribute("PreferredLaneX", 0)
 end
 
 -- Wide, mostly-mud expanse with a firmer path threaded through it (GDD 9.3):
@@ -274,6 +278,8 @@ local function configureMudflatChunk(chunk: Model, index: number, centerZ: numbe
 	if index % 4 == 3 then
 		addFuelPickup(chunk, center * CFrame.new(pathOffset, 2.25, -160))
 	end
+
+	chunk:SetAttribute("PreferredLaneX", pathOffset)
 end
 
 -- Left lane trades grip for a fuel pickup, right lane keeps normal grip and
@@ -308,6 +314,10 @@ local function configureForkChunk(chunk: Model, centerZ: number)
 	for offsetZ = -1, 1 do
 		addBoulder(chunk, Vector3.new(0, 2, centerZ + offsetZ * 150), 0.9)
 	end
+
+	-- Steer AI toward the predictable right lane rather than the boulder
+	-- divider it would otherwise drive straight at.
+	chunk:SetAttribute("PreferredLaneX", laneOffset)
 end
 
 local function configureChunk(chunk: Model, index: number)
