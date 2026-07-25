@@ -25,6 +25,13 @@
       }
     },
 
+    "TextChatService": {
+      "$className": "TextChatService",
+      "$properties": {
+        "ChatVersion": "TextChatService"
+      }
+    },
+
     "StarterPlayer": {
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
