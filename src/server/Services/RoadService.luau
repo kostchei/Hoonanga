@@ -128,6 +128,15 @@ local FORK_LANE_WIDTH = 72
 local FORK_MIN_INTERVAL = 6
 local FORK_MAX_INTERVAL = 10
 
+-- Every generation decision draws from this one seeded stream rather than
+-- the global math.random (GDD 8.5). A run is therefore reproducible from its
+-- seed alone, which makes a terrain bug something you can hand to someone
+-- else and have them see, and is the prerequisite for daily-challenge style
+-- modes later. Player actions stay non-deterministic - only the road is
+-- pinned.
+local directorSeed = 0
+local directorRandom = Random.new()
+
 local chunks: { ChunkRecord } = {}
 local chunkFolder: Folder
 local nextChunkIndex = 0
@@ -171,23 +180,26 @@ local function pickNextFamily(): (string, boolean, boolean)
 			end
 		end
 
-		local roll = math.random() * totalWeight
+		local roll = directorRandom:NextNumber() * totalWeight
 		for _, entry in ROAD_FAMILY_WEIGHTS do
 			if isEligible(entry) then
 				roll -= entry.Weight
 				if roll <= 0 then
 					currentFamily = entry.Name
-					remainingInFamily = math.random(entry.MinRun, entry.MaxRun)
+					remainingInFamily = directorRandom:NextInteger(entry.MinRun, entry.MaxRun)
 					if entry.CooldownRuns > 0 then
 						familyCooldowns[entry.Name] = entry.CooldownRuns + 1
 					end
 
-					if familyIsFlat(entry.Name) or math.random() > SLOPE_RUN_CHANCE then
+					if
+						familyIsFlat(entry.Name)
+						or directorRandom:NextNumber() > SLOPE_RUN_CHANCE
+					then
 						runPitch = 0
 						runRoll = 0
 					else
-						runPitch = (math.random() * 2 - 1) * MAX_PITCH
-						runRoll = (math.random() * 2 - 1) * MAX_ROLL
+						runPitch = directorRandom:NextNumber(-1, 1) * MAX_PITCH
+						runRoll = directorRandom:NextNumber(-1, 1) * MAX_ROLL
 					end
 					break
 				end
@@ -698,7 +710,7 @@ local function configureChunk(chunk: Model, index: number)
 	local pitch, roll = runPitch, runRoll
 
 	if chunksUntilFork <= 0 and currentFamily ~= "RaisedHighway" then
-		chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
+		chunksUntilFork = directorRandom:NextInteger(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 		chunk:SetAttribute("RoadFamily", "Fork")
 		configureForkChunk(chunk, index, centerZ)
 	else
@@ -795,11 +807,17 @@ end
 
 local RoadService = {}
 
-function RoadService.Start()
+-- Pass a seed to reproduce a specific run exactly; omit it and one is drawn
+-- from the clock and logged so a run you stumble into can still be replayed.
+function RoadService.Start(seed: number?)
 	if running then
 		return
 	end
 	running = true
+
+	directorSeed = seed or (DateTime.now().UnixTimestampMillis % 2 ^ 31)
+	directorRandom = Random.new(directorSeed)
+	print(string.format("[Hoonanga] Road seed %d", directorSeed))
 
 	local existing = Workspace:FindFirstChild("HoonangaWorld")
 	if existing then
@@ -846,14 +864,14 @@ function RoadService.Start()
 	-- Every run opens on a stretch of boulder plain: forgiving terrain with
 	-- clear sightlines, per the design doc's pressure curve (GDD 4.3).
 	currentFamily = "BoulderPlain"
-	remainingInFamily = math.random(4, 8)
+	remainingInFamily = directorRandom:NextInteger(4, 8)
 	familyCooldowns = {}
 	-- The opening stretch is flat and at ground level so the spawn area is
 	-- predictable.
 	groundExitY = 0
 	runPitch = 0
 	runRoll = 0
-	chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
+	chunksUntilFork = directorRandom:NextInteger(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 	nextChunkIndex = WorldConfig.Road.InitialChunkCount
 	for index = 0, WorldConfig.Road.InitialChunkCount - 1 do
 		table.insert(chunks, createChunk(index))
@@ -865,6 +883,18 @@ function RoadService.Start()
 			task.wait(0.5)
 		end
 	end)
+end
+
+function RoadService.GetSeed(): number
+	return directorSeed
+end
+
+-- Releases the re-entry guard so the road can be regenerated in-process.
+-- Exists for tests that need to build the same road twice and compare;
+-- gameplay only ever starts the road once.
+function RoadService.Reset()
+	running = false
+	chunks = {}
 end
 
 return RoadService
