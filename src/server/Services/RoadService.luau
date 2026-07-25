@@ -18,12 +18,43 @@ local ROAD_COLORS = {
 	LooseStone = Color3.fromRGB(151, 119, 80),
 	Mud = Color3.fromRGB(78, 61, 43),
 	Oil = Color3.fromRGB(25, 24, 21),
+	CanyonRock = Color3.fromRGB(96, 80, 66),
 }
+
+-- Road families cycle in runs of 4-8 chunks (GDD 8.6) rather than the whole
+-- road being one family forever, both for driving variety and to mitigate
+-- the "procedural repetition" risk (GDD 26). True per-chunk curvature isn't
+-- implemented yet - every chunk is still a straight corridor along Z - so
+-- families are differentiated by width, surface, and hazards rather than
+-- path shape for now.
+local ROAD_FAMILIES = { "StonyDesert", "Canyon", "Mudflat" }
+local CANYON_WIDTH = 34
+local CANYON_WALL_HEIGHT = 60
 
 local chunks: { ChunkRecord } = {}
 local chunkFolder: Folder
 local nextChunkIndex = 0
 local running = false
+local currentFamily = "StonyDesert"
+local remainingInFamily = 0
+
+local function pickNextFamily(): string
+	if remainingInFamily > 0 then
+		remainingInFamily -= 1
+		return currentFamily
+	end
+
+	local candidates = {}
+	for _, family in ROAD_FAMILIES do
+		if family ~= currentFamily then
+			table.insert(candidates, family)
+		end
+	end
+
+	currentFamily = candidates[math.random(1, #candidates)]
+	remainingInFamily = math.random(4, 8) - 1
+	return currentFamily
+end
 
 local function makeSurface(
 	parent: Instance,
@@ -62,15 +93,43 @@ local function addBoulder(parent: Instance, position: Vector3, scale: number)
 	CollectionService:AddTag(boulder, "RoadHardBoundary")
 end
 
-local function configureChunk(chunk: Model, index: number)
+local function addFuelPickup(chunk: Model, cframe: CFrame)
+	local fuelPickup = Instance.new("Part")
+	fuelPickup.Name = "FuelPickup"
+	fuelPickup.Anchored = true
+	fuelPickup.CanCollide = false
+	fuelPickup.Size = Vector3.new(3.2, 4, 3.2)
+	fuelPickup.CFrame = cframe * CFrame.Angles(0, 0, math.rad(90))
+	fuelPickup.Shape = Enum.PartType.Cylinder
+	fuelPickup.Color = Color3.fromRGB(191, 59, 41)
+	fuelPickup.Material = Enum.Material.Metal
+	fuelPickup:SetAttribute("FuelAmount", 90)
+	fuelPickup.Parent = chunk
+	CollectionService:AddTag(fuelPickup, "FuelPickup")
+end
+
+local function addSockets(chunk: Model, centerZ: number, chunkLength: number)
+	local socketStart = Instance.new("Part")
+	socketStart.Name = "StartSocket"
+	socketStart.Anchored = true
+	socketStart.CanCollide = false
+	socketStart.CanQuery = false
+	socketStart.Transparency = 1
+	socketStart.Size = Vector3.one
+	socketStart.CFrame = CFrame.new(0, 0, centerZ + chunkLength / 2)
+	socketStart.Parent = chunk
+
+	local socketEnd = socketStart:Clone()
+	socketEnd.Name = "EndSocket"
+	socketEnd.CFrame = CFrame.new(0, 0, centerZ - chunkLength / 2)
+	socketEnd.Parent = chunk
+end
+
+local function configureStonyDesertChunk(chunk: Model, index: number, centerZ: number)
 	local road = WorldConfig.Road
-	local centerZ = -(index * road.ChunkLength)
 	local center = CFrame.new(0, ROAD_Y, centerZ)
 	local variant = index % 4
 	local isAsphalt = variant == 0
-	chunk.Name = string.format("Chunk_%04d", index)
-	chunk:SetAttribute("ChunkIndex", index)
-	chunk:SetAttribute("RoadFamily", "StonyDesert")
 
 	makeSurface(
 		chunk,
@@ -116,34 +175,8 @@ local function configureChunk(chunk: Model, index: number)
 		oil.Transparency = 0.12
 		oil:SetAttribute("HazardType", "Oil")
 	elseif variant == 3 then
-		local fuelPickup = Instance.new("Part")
-		fuelPickup.Name = "FuelPickup"
-		fuelPickup.Anchored = true
-		fuelPickup.CanCollide = false
-		fuelPickup.Size = Vector3.new(3.2, 4, 3.2)
-		fuelPickup.CFrame = center * CFrame.new(-13, 2.25, -30) * CFrame.Angles(0, 0, math.rad(90))
-		fuelPickup.Shape = Enum.PartType.Cylinder
-		fuelPickup.Color = Color3.fromRGB(191, 59, 41)
-		fuelPickup.Material = Enum.Material.Metal
-		fuelPickup:SetAttribute("FuelAmount", 90)
-		fuelPickup.Parent = chunk
-		CollectionService:AddTag(fuelPickup, "FuelPickup")
+		addFuelPickup(chunk, center * CFrame.new(-13, 2.25, -30))
 	end
-
-	local socketStart = Instance.new("Part")
-	socketStart.Name = "StartSocket"
-	socketStart.Anchored = true
-	socketStart.CanCollide = false
-	socketStart.CanQuery = false
-	socketStart.Transparency = 1
-	socketStart.Size = Vector3.one
-	socketStart.CFrame = CFrame.new(0, 0, centerZ + road.ChunkLength / 2)
-	socketStart.Parent = chunk
-
-	local socketEnd = socketStart:Clone()
-	socketEnd.Name = "EndSocket"
-	socketEnd.CFrame = CFrame.new(0, 0, centerZ - road.ChunkLength / 2)
-	socketEnd.Parent = chunk
 
 	for _, side in { -1, 1 } do
 		local baseX = side * (road.ChunkWidth / 2 - 8)
@@ -154,6 +187,99 @@ local function configureChunk(chunk: Model, index: number)
 		)
 		addBoulder(chunk, Vector3.new(baseX - side * 7, 1.2, centerZ + 145 - side * 18), 0.55)
 	end
+end
+
+-- Narrow choke-point corridor with real wall collision geometry (GDD 9.2):
+-- hitting a wall at speed triggers CollisionDamageService's existing
+-- RoadHardBoundary impact handling, the same mechanism boulders already use.
+local function configureCanyonChunk(chunk: Model, index: number, centerZ: number)
+	local road = WorldConfig.Road
+	local center = CFrame.new(0, ROAD_Y, centerZ)
+
+	makeSurface(
+		chunk,
+		"CanyonFloor",
+		Vector3.new(CANYON_WIDTH, 1, road.ChunkLength),
+		center * CFrame.new(0, -0.4, 0),
+		"WornDirt",
+		ROAD_COLORS.WornDirt,
+		Enum.Material.Ground
+	)
+
+	for _, side in { -1, 1 } do
+		local wall = Instance.new("Part")
+		wall.Name = "CanyonWall"
+		wall.Anchored = true
+		wall.Size = Vector3.new(16, CANYON_WALL_HEIGHT, road.ChunkLength)
+		wall.CFrame = center
+			* CFrame.new(side * (CANYON_WIDTH / 2 + 8), CANYON_WALL_HEIGHT / 2 - 3, 0)
+		wall.Color = ROAD_COLORS.CanyonRock
+		wall.Material = Enum.Material.Rock
+		wall.Parent = chunk
+		CollectionService:AddTag(wall, "RoadHardBoundary")
+	end
+
+	-- A boulder pinched toward one side per chunk, alternating, for a mild
+	-- slalom (GDD 9.2 "fallen boulder slalom") without fully blocking the
+	-- narrow corridor.
+	local pinchSide = if index % 2 == 0 then -1 else 1
+	addBoulder(chunk, Vector3.new(pinchSide * (CANYON_WIDTH / 2 - 6), 1.8, centerZ), 0.85)
+
+	if index % 4 == 3 then
+		addFuelPickup(chunk, center * CFrame.new(-pinchSide * 8, 2.25, -120))
+	end
+end
+
+-- Wide, mostly-mud expanse with a firmer path threaded through it (GDD 9.3):
+-- straying off the path costs grip and builds BogLevel through the existing
+-- VehiclePhysics surface-profile handling, no new physics code needed.
+local function configureMudflatChunk(chunk: Model, index: number, centerZ: number)
+	local road = WorldConfig.Road
+	local center = CFrame.new(0, ROAD_Y, centerZ)
+	local pathOffset = if index % 2 == 0 then -18 else 18
+
+	makeSurface(
+		chunk,
+		"MudExpanse",
+		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
+		center * CFrame.new(0, -0.5, 0),
+		"Mud",
+		ROAD_COLORS.Mud,
+		Enum.Material.Mud
+	)
+
+	makeSurface(
+		chunk,
+		"FirmPath",
+		Vector3.new(22, 0.22, road.ChunkLength),
+		center * CFrame.new(pathOffset, 0.05, 0),
+		"WornDirt",
+		ROAD_COLORS.WornDirt,
+		Enum.Material.Ground
+	)
+
+	if index % 4 == 3 then
+		addFuelPickup(chunk, center * CFrame.new(pathOffset, 2.25, -160))
+	end
+end
+
+local function configureChunk(chunk: Model, index: number)
+	local road = WorldConfig.Road
+	local centerZ = -(index * road.ChunkLength)
+	local family = pickNextFamily()
+	chunk.Name = string.format("Chunk_%04d", index)
+	chunk:SetAttribute("ChunkIndex", index)
+	chunk:SetAttribute("RoadFamily", family)
+
+	if family == "Canyon" then
+		configureCanyonChunk(chunk, index, centerZ)
+	elseif family == "Mudflat" then
+		configureMudflatChunk(chunk, index, centerZ)
+	else
+		configureStonyDesertChunk(chunk, index, centerZ)
+	end
+
+	addSockets(chunk, centerZ, road.ChunkLength)
 end
 
 local function createChunk(index: number): ChunkRecord
@@ -254,6 +380,8 @@ function RoadService.Start()
 	CollectionService:AddTag(killPlane, "RoadLethalZone")
 
 	chunks = {}
+	currentFamily = "StonyDesert"
+	remainingInFamily = math.random(4, 8)
 	nextChunkIndex = WorldConfig.Road.InitialChunkCount
 	for index = 0, WorldConfig.Road.InitialChunkCount - 1 do
 		table.insert(chunks, createChunk(index))

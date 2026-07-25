@@ -65,6 +65,22 @@ expect(foundSurfaces.Asphalt, "no playable asphalt surface was generated")
 expect(foundSurfaces.Mud, "no playable mud surface was generated")
 expect(foundSurfaces.Oil, "no playable oil surface was generated")
 
+local seenFamilies = {}
+for _, chunkModel in roadChunks:GetChildren() do
+	local family = chunkModel:GetAttribute("RoadFamily")
+	if typeof(family) == "string" then
+		seenFamilies[family] = true
+	end
+end
+local familyCount = 0
+for _ in seenFamilies do
+	familyCount += 1
+end
+expect(
+	familyCount >= 2,
+	"expected at least 2 road families across the initial chunks, found " .. familyCount
+)
+
 local vehicles = world:FindFirstChild("Vehicles")
 expect(vehicles ~= nil, "Vehicles folder is missing")
 local enemy = vehicles:FindFirstChild("EnemyUte_01")
