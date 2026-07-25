@@ -312,6 +312,8 @@ function VehicleBuilder.CreateUte(
 	vehicle:SetAttribute("VehicleType", "Ute")
 	vehicle:SetAttribute("Hull", 100)
 	vehicle:SetAttribute("MaxHull", 100)
+	vehicle:SetAttribute("OperatorHealth", 100)
+	vehicle:SetAttribute("MaxOperatorHealth", 100)
 	vehicle:SetAttribute("Fuel", 300)
 	vehicle:SetAttribute("MaxFuel", 300)
 	vehicle:SetAttribute("OutOfFuel", false)
@@ -391,6 +393,24 @@ function VehicleBuilder.CreateUte(
 		else Vector3.new(0, 1.65, -1.2)
 	weldToChassis(chassis, seat, CFrame.new(seatOffset))
 	seat.Parent = vehicle
+
+	-- Milestone 1's personnel damage channel (GDD 11.1/11.2): an invisible,
+	-- non-physical hitbox standing in for the operator's torso, positioned
+	-- above the seat. CanQuery stays true (it's the only thing about this
+	-- part that matters) so weapon raycasts can single it out from the
+	-- surrounding hull.
+	local personnelHitbox = makePart(
+		"PersonnelHitbox",
+		Vector3.new(1.6, 2.1, 1.6),
+		bodyColor,
+		Enum.Material.SmoothPlastic
+	)
+	personnelHitbox.Transparency = 1
+	personnelHitbox.CanCollide = false
+	personnelHitbox.CanTouch = false
+	personnelHitbox.CanQuery = true
+	weldToChassis(chassis, personnelHitbox, CFrame.new(seatOffset + Vector3.new(0, 1.1, 0)))
+	personnelHitbox.Parent = vehicle
 
 	for corner, offset in WHEEL_OFFSETS do
 		addSuspension(chassis, corner, offset)

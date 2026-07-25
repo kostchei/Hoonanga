@@ -128,6 +128,29 @@ local function applyHullDamage(vehicle: Model, damage: number, sourceVehicle: Mo
 	end
 end
 
+-- Personnel health is tracked on the vehicle rather than a real Humanoid:
+-- the AI enemy has no character at all, and the player's own character is
+-- welded into the seat with CanQuery disabled, so neither can be hit
+-- directly by a raycast. Milestone 1 has no convoy/control-transfer system
+-- to hand off to (that's Milestone 4), so per GDD 11.6 a killed operator
+-- eliminates the single-vehicle "convoy" the same way hull loss does.
+local function applyOperatorDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
+	if vehicle:GetAttribute("Destroyed") then
+		return
+	end
+
+	local operatorHealth = vehicle:GetAttribute("OperatorHealth")
+	if typeof(operatorHealth) ~= "number" then
+		return
+	end
+
+	operatorHealth = math.max(0, operatorHealth - damage)
+	vehicle:SetAttribute("OperatorHealth", operatorHealth)
+	if operatorHealth <= 0 then
+		destroyVehicle(vehicle, sourceVehicle)
+	end
+end
+
 local CombatService = {}
 
 function CombatService.ApplyHullDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
@@ -135,6 +158,13 @@ function CombatService.ApplyHullDamage(vehicle: Model, damage: number, sourceVeh
 		return
 	end
 	applyHullDamage(vehicle, damage, sourceVehicle)
+end
+
+function CombatService.ApplyOperatorDamage(vehicle: Model, damage: number, sourceVehicle: Model?)
+	if damage <= 0 or damage ~= damage then
+		return
+	end
+	applyOperatorDamage(vehicle, damage, sourceVehicle)
 end
 
 function CombatService.DestroyVehicle(vehicle: Model, sourceVehicle: Model?)
@@ -164,7 +194,15 @@ local function fireRay(
 				if typeof(damageMultiplier) ~= "number" then
 					damageMultiplier = 1
 				end
-				applyHullDamage(targetVehicle, config.Damage * damageMultiplier, vehicle)
+				if result.Instance.Name == "PersonnelHitbox" then
+					applyOperatorDamage(
+						targetVehicle,
+						config.PersonnelDamage * damageMultiplier,
+						vehicle
+					)
+				else
+					applyHullDamage(targetVehicle, config.Damage * damageMultiplier, vehicle)
+				end
 			end
 		end
 	end

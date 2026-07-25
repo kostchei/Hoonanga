@@ -78,6 +78,11 @@ for _, corner in { "FL", "FR", "RL", "RR" } do
 		"enemy ute has no " .. corner .. " suspension raycast point"
 	)
 end
+local personnelHitbox = enemy:FindFirstChild("PersonnelHitbox")
+expect(personnelHitbox ~= nil, "enemy ute has no personnel hitbox")
+expect(personnelHitbox.CanQuery, "personnel hitbox cannot be hit by weapon raycasts")
+expect(not personnelHitbox.CanCollide, "personnel hitbox physically collides")
+expect(enemy:GetAttribute("OperatorHealth") == 100, "enemy ute operator health not initialized")
 expect(
 	enemy:GetAttribute("VisualAssetId") == 6418225759,
 	"enemy ute did not mount the audited pickup body"
@@ -145,6 +150,20 @@ expect(
 expect(
 	enemy.PrimaryPart:FindFirstChild("ForwardMuzzleAttachment") ~= nil,
 	"enemy ute has no forward muzzle"
+)
+
+local operatorHealthBeforeShot = enemy:GetAttribute("OperatorHealth")
+CombatService.ApplyOperatorDamage(enemy, 21, nil)
+expect(
+	typeof(operatorHealthBeforeShot) == "number"
+		and (enemy:GetAttribute("OperatorHealth") :: number) < operatorHealthBeforeShot
+		and enemy:GetAttribute("Destroyed") ~= true,
+	"personnel damage below the kill threshold did not reduce operator health"
+)
+CombatService.ApplyOperatorDamage(enemy, 100, nil)
+expect(
+	enemy:GetAttribute("Destroyed") == true,
+	"operator health reaching zero did not destroy the vehicle"
 )
 
 print(

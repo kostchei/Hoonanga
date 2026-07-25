@@ -3,6 +3,7 @@
 export type WeaponConfig = {
 	FireInterval: number,
 	Damage: number,
+	PersonnelDamage: number,
 	Range: number,
 	MagazineSize: number,
 	ReloadTime: number,
@@ -12,6 +13,7 @@ export type WeaponConfig = {
 local machineGun: WeaponConfig = {
 	FireInterval = 0.1,
 	Damage = 4,
+	PersonnelDamage = 22,
 	Range = 650,
 	MagazineSize = 80,
 	ReloadTime = 2.4,
@@ -21,6 +23,7 @@ local machineGun: WeaponConfig = {
 local forwardGun: WeaponConfig = {
 	FireInterval = 0.1,
 	Damage = 8,
+	PersonnelDamage = 38,
 	Range = 750,
 	MagazineSize = 80,
 	ReloadTime = 2.4,
