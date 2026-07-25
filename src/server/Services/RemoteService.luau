@@ -18,6 +18,7 @@ local REMOTE_EVENT_NAMES = {
 	"ProgressionUpdated",
 	"ActiveUpgradesUpdated",
 	"LeaderboardUpdated",
+	"PlayAudioEffect",
 }
 
 local REMOTE_FUNCTION_NAMES = {

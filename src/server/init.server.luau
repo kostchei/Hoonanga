@@ -1,6 +1,7 @@
 --!strict
 
 local AIService = require(script.Services.AIService)
+local AudioService = require(script.Services.AudioService)
 local CollisionDamageService = require(script.Services.CollisionDamageService)
 local ConvoyService = require(script.Services.ConvoyService)
 local FireService = require(script.Services.FireService)
@@ -17,6 +18,7 @@ local VehicleService = require(script.Services.VehicleService)
 local WeaponService = require(script.Services.WeaponService)
 
 RemoteService.Start()
+AudioService.Start()
 ProgressionService.Start()
 GarageService.Start()
 UpgradeService.Start()

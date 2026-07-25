@@ -1,6 +1,7 @@
 --!strict
 
 local AccessibilityController = require(script.Controllers.AccessibilityController)
+local AudioController = require(script.Controllers.AudioController)
 local CameraController = require(script.Controllers.CameraController)
 local ConvoySelectionController = require(script.Controllers.ConvoySelectionController)
 local GamepadController = require(script.Controllers.GamepadController)
@@ -16,6 +17,7 @@ local WeaponController = require(script.Controllers.WeaponController)
 VehicleController.Start()
 GamepadController.Start()
 AccessibilityController.Start()
+AudioController.Start()
 ConvoySelectionController.Start()
 GarageController.Start()
 SpectateController.Start()
