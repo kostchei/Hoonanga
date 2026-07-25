@@ -95,6 +95,10 @@ function CameraController.Start()
 			or input.KeyCode == Enum.KeyCode.M
 		then
 			isMouseUnlocked = not isMouseUnlocked
+			if isMouseUnlocked then
+				yaw = 0
+				pitch = 0
+			end
 		end
 	end)
 
@@ -126,6 +130,9 @@ function CameraController.Start()
 				if isMouseUnlocked then
 					UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 					UserInputService.MouseIconEnabled = true
+					-- Reset camera look angles straight forward while navigating UI
+					yaw = 0
+					pitch = 0
 				else
 					UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 					UserInputService.MouseIconEnabled = false
@@ -155,6 +162,10 @@ end
 
 function CameraController.SetMouseUnlocked(unlocked: boolean)
 	isMouseUnlocked = unlocked
+	if unlocked then
+		yaw = 0
+		pitch = 0
+	end
 end
 
 function CameraController.IsMouseUnlocked(): boolean

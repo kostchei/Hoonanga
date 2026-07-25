@@ -39,7 +39,7 @@ function GarageController.Start()
 
 	local title = Instance.new("TextLabel")
 	title.Name = "Title"
-	title.Text = "GARAGE & PROGRESSION [G]"
+	title.Text = "GARAGE & PROGRESSION"
 	title.Font = Enum.Font.GothamBold
 	title.TextSize = 16
 	title.TextColor3 = Color3.fromRGB(255, 103, 65)
@@ -92,7 +92,7 @@ function GarageController.Start()
 
 	local infoLabel = Instance.new("TextLabel")
 	infoLabel.Name = "Info"
-	infoLabel.Text = "Scrap: 0 | Class: Ute"
+	infoLabel.Text = "Scrap: 0 | Class: Ute\n\n[Press G to Toggle Menu - Do Not Hold]"
 	infoLabel.Font = Enum.Font.GothamMedium
 	infoLabel.TextSize = 14
 	infoLabel.TextColor3 = Color3.fromRGB(238, 220, 189)
@@ -127,7 +127,7 @@ function GarageController.Start()
 	progressionUpdatedRemote.OnClientEvent:Connect(function(profile: any)
 		if profile then
 			infoLabel.Text = string.format(
-				"Scrap: %d\nClass: %s | Cosmetic: %s",
+				"Scrap: %d\nClass: %s | Cosmetic: %s\n\n[Press G to Toggle Menu - Do Not Hold]",
 				profile.Scrap or 0,
 				profile.EquippedClass or "Ute",
 				profile.EquippedCosmetic or "Default"
