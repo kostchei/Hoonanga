@@ -15,6 +15,18 @@ local enemyVehicle: Model? = nil
 local lastFireAttempt = 0
 local AI_FIRE_INTERVAL = 0.55
 
+-- Below 1 so the player can actually run the enemy down; without this the
+-- enemy shares the player's top speed and, having spawned ahead, can never
+-- be caught.
+local AI_MAX_SPEED_SCALE = 0.88
+-- Inside this range the enemy stops charging and fights alongside instead
+-- of overshooting past the player and having to loop back every pass.
+local ENGAGE_RANGE = 110
+-- How wrong the AI's steering is allowed to be. Deliberate imperfection:
+-- a perfectly-tracking enemy reads as a homing missile, not a driver.
+local STEER_ERROR = 0.22
+local STEER_ERROR_RATE = 0.45
+
 local function targetVehicle(): Model?
 	for _, player in Players:GetPlayers() do
 		local vehicle = VehicleService.GetPlayerVehicle(player)
@@ -49,18 +61,46 @@ local function currentChunkLaneX(chassis: BasePart): number
 	return 0
 end
 
-local function calculateSteering(chassis: BasePart, target: Model?): number
-	local desiredX = currentChunkLaneX(chassis)
-	if target and target.PrimaryPart then
-		local separation = target.PrimaryPart.Position.Z - chassis.Position.Z
-		if math.abs(separation) < 70 then
-			desiredX += if target.PrimaryPart.Position.X >= chassis.Position.X then -12 else 12
-		end
+-- Returns steer (-1..1) and throttle (-1..1). The enemy hunts the player
+-- rather than driving one-way down the road forever: once the player is
+-- behind it, it commits to a U-turn and comes back for another pass, which
+-- is what makes it an opponent instead of a pace car.
+local function calculateDriving(chassis: BasePart, target: Model?, now: number): (number, number)
+	-- No one to hunt: cruise the chunk's safe line at a relaxed pace.
+	if not target or not target.PrimaryPart then
+		local lookAhead =
+			Vector3.new(currentChunkLaneX(chassis), chassis.Position.Y, chassis.Position.Z - 90)
+		local localAhead = chassis.CFrame:PointToObjectSpace(lookAhead)
+		return math.clamp(localAhead.X / 18, -1, 1), 0.5
 	end
 
-	local lookAhead = Vector3.new(desiredX, chassis.Position.Y, chassis.Position.Z - 90)
-	local localTarget = chassis.CFrame:PointToObjectSpace(lookAhead)
-	return math.clamp(localTarget.X / 18, -1, 1)
+	local targetPosition = target.PrimaryPart.Position
+	local distance = (targetPosition - chassis.Position).Magnitude
+	local localTarget = chassis.CFrame:PointToObjectSpace(targetPosition)
+	-- Roblox LookVector points down -Z, so a positive local Z means the
+	-- player is behind us.
+	local targetIsBehind = localTarget.Z > 0
+
+	local steer, throttle
+	if targetIsBehind then
+		-- Full-lock U-turn. Throttle is held back so the turn radius stays
+		-- inside the road rather than arcing off into the scenery.
+		steer = if localTarget.X >= 0 then 1 else -1
+		throttle = 0.45
+	elseif distance > ENGAGE_RANGE then
+		steer = math.clamp(localTarget.X / 26, -1, 1)
+		throttle = 1
+	else
+		-- Alongside: ease off so it fights the player instead of blowing
+		-- past and immediately needing another U-turn.
+		steer = math.clamp(localTarget.X / 34, -1, 1)
+		throttle = 0.62
+	end
+
+	-- Wandering steering error, so the enemy drifts and corrects like a
+	-- driver rather than tracking perfectly.
+	steer += math.noise(now * STEER_ERROR_RATE) * STEER_ERROR
+	return math.clamp(steer, -1, 1), throttle
 end
 
 local function updateEnemy(deltaTime: number)
@@ -75,16 +115,17 @@ local function updateEnemy(deltaTime: number)
 	end
 
 	local target = targetVehicle()
+	local now = Workspace:GetServerTimeNow()
+	local steer, throttle = calculateDriving(chassis, target, now)
 	VehiclePhysics.Step(vehicle, {
-		Throttle = 0.82,
-		Steer = calculateSteering(chassis, target),
+		Throttle = throttle,
+		Steer = steer,
 		Handbrake = false,
 	}, deltaTime)
 
 	if target and target.PrimaryPart then
 		local muzzle = chassis:FindFirstChild("TurretMuzzleAttachment")
 		if muzzle and muzzle:IsA("Attachment") then
-			local now = Workspace:GetServerTimeNow()
 			if now - lastFireAttempt >= AI_FIRE_INTERVAL then
 				lastFireAttempt = now
 				local predictedPosition = target.PrimaryPart.Position
@@ -115,6 +156,7 @@ function AIService.Start()
 	enemyVehicle:SetAttribute("OwnerUserId", 0)
 	enemyVehicle:SetAttribute("Team", "Enemy")
 	enemyVehicle:SetAttribute("DamageMultiplier", 0.2)
+	enemyVehicle:SetAttribute("MaxSpeedScale", AI_MAX_SPEED_SCALE)
 
 	local chassis = enemyVehicle.PrimaryPart
 	if chassis and chassis:CanSetNetworkOwnership() then

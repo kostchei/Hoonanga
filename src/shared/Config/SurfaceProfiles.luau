@@ -38,6 +38,14 @@ local profiles: { [string]: SurfaceProfile } = {
 		FuelUse = 1.25,
 		BogRate = 0.05,
 	},
+	-- Dry salt crust: hard, flat and fast - the one off-road surface that
+	-- rewards leaving the road rather than punishing it.
+	SaltPan = {
+		Grip = 0.94,
+		Drag = 1,
+		FuelUse = 1,
+		BogRate = 0,
+	},
 	Oil = {
 		Grip = 0.12,
 		Drag = 0.9,

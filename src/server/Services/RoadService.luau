@@ -12,14 +12,33 @@ type ChunkRecord = {
 }
 
 local ROAD_Y = 0
+-- Red-centre palette: iron-oxide reds and oranges, worn browns, and the
+-- bleached white of a dry salt pan for contrast.
 local ROAD_COLORS = {
-	Asphalt = Color3.fromRGB(72, 70, 66),
-	WornDirt = Color3.fromRGB(125, 92, 58),
-	LooseStone = Color3.fromRGB(151, 119, 80),
-	Mud = Color3.fromRGB(78, 61, 43),
-	Oil = Color3.fromRGB(25, 24, 21),
-	CanyonRock = Color3.fromRGB(96, 80, 66),
+	Asphalt = Color3.fromRGB(64, 56, 52),
+	WornDirt = Color3.fromRGB(150, 82, 48),
+	LooseStone = Color3.fromRGB(174, 96, 54),
+	Sand = Color3.fromRGB(214, 148, 84),
+	SaltPan = Color3.fromRGB(232, 228, 216),
+	Mud = Color3.fromRGB(56, 38, 25),
+	Oil = Color3.fromRGB(9, 9, 10),
+	CanyonRock = Color3.fromRGB(142, 70, 45),
 }
+
+-- Sections should read as distinct stretches of country rather than one
+-- flat tone repeated forever, so each chunk's terrain is nudged warmer
+-- (toward rust) or darker (toward shadowed earth) by a deterministic
+-- per-chunk amount. Deterministic so a rebuilt chunk keeps its colour.
+local VARIEGATION_WARM = Color3.fromRGB(198, 84, 38)
+local VARIEGATION_DARK = Color3.fromRGB(46, 28, 20)
+
+local function variegate(base: Color3, index: number, amount: number): Color3
+	local shift = math.noise(index * 0.41, 1.7) * 2
+	if shift >= 0 then
+		return base:Lerp(VARIEGATION_WARM, math.clamp(shift, 0, 1) * amount)
+	end
+	return base:Lerp(VARIEGATION_DARK, math.clamp(-shift, 0, 1) * amount)
+end
 
 -- Road families cycle in runs of 4-8 chunks (GDD 8.6) rather than the whole
 -- road being one family forever, both for driving variety and to mitigate
@@ -27,10 +46,47 @@ local ROAD_COLORS = {
 -- implemented yet - every chunk is still a straight corridor along Z - so
 -- families are differentiated by width, surface, and hazards rather than
 -- path shape for now.
-local ROAD_FAMILIES = { "StonyDesert", "Canyon", "Mudflat", "RaisedHighway" }
-local CANYON_WIDTH = 34
+--
+-- Weighted rather than uniform: the run should mostly be ground-level
+-- racing through canyons, boulder plains and sandy desert. RaisedHighway is
+-- deliberately rare because its whole identity is exposure and falling, and
+-- at even odds it turned "a lot of the road" into elevated deck where the
+-- player was falling off constantly instead of racing.
+-- Run length is per-family, not global. Weight alone controls how often a
+-- family is *picked*; without per-family run lengths a rarely-picked family
+-- still occupied 4-8 chunks whenever it came up, so "occasional mudflat"
+-- turned into a third of the run spent in mud. The staple families get long
+-- stretches; the event biomes get short ones.
+--
+-- RaisedHighway must never run shorter than 3: the first chunk of a run is
+-- the up-ramp and the last is the down-ramp, so a 1-2 chunk run would ramp
+-- up to the elevated deck and stop there, leaving the road ending in a
+-- sheer drop.
+-- CooldownRuns blocks a family from being re-picked for that many
+-- subsequent runs. Low weight alone was not enough to make the highway
+-- rare: picking it is uncommon, but it occupies 3-4 chunks each time and
+-- nothing stopped it being picked again one short run later, which in
+-- practice produced stretches that were nearly 40% elevated deck.
+local ROAD_FAMILY_WEIGHTS = {
+	{ Name = "BoulderPlain", Weight = 10, MinRun = 4, MaxRun = 8, CooldownRuns = 0 },
+	{ Name = "SandyDesert", Weight = 10, MinRun = 4, MaxRun = 8, CooldownRuns = 0 },
+	{ Name = "Canyon", Weight = 9, MinRun = 3, MaxRun = 6, CooldownRuns = 1 },
+	{ Name = "Mudflat", Weight = 5, MinRun = 1, MaxRun = 3, CooldownRuns = 2 },
+	{ Name = "RaisedHighway", Weight = 2, MinRun = 3, MaxRun = 4, CooldownRuns = 5 },
+}
+
+-- The good ground you actually race on: a clear road down the middle of far
+-- wider drivable terrain. The terrain either side is rougher (loose stone,
+-- sand) and costs grip, but it is still ground - you can leave the road,
+-- swing a U-turn and come back without falling off anything.
+local ROAD_SURFACE_WIDTH = 38
+-- "Small vehicle-length mud patches at most" - a chassis is ~15 studs long,
+-- so a patch is a thing you hit and power through, not a bog you live in.
+local MUD_PATCH_SIZE = Vector3.new(17, 0.18, 20)
+
+local CANYON_WIDTH = 92
 local CANYON_WALL_HEIGHT = 60
-local HIGHWAY_WIDTH = 44
+local HIGHWAY_WIDTH = 96
 local HIGHWAY_Y = 22
 local HIGHWAY_RAIL_HEIGHT = 3.4
 
@@ -42,7 +98,7 @@ local HIGHWAY_RAIL_HEIGHT = 3.4
 -- real route choice with a real tradeoff) with the existing straight-corridor
 -- chunk model, and reconverges trivially since the lanes never physically
 -- separated.
-local FORK_LANE_WIDTH = 38
+local FORK_LANE_WIDTH = 72
 local FORK_MIN_INTERVAL = 6
 local FORK_MAX_INTERVAL = 10
 
@@ -50,9 +106,10 @@ local chunks: { ChunkRecord } = {}
 local chunkFolder: Folder
 local nextChunkIndex = 0
 local running = false
-local currentFamily = "StonyDesert"
+local currentFamily = "BoulderPlain"
 local remainingInFamily = 0
 local chunksUntilFork = 0
+local familyCooldowns: { [string]: number } = {}
 
 -- isFirstOfRun/isLastOfRun let RaisedHighway bracket itself with ramp
 -- chunks: every other family sits at ROAD_Y, but the highway deck sits 22
@@ -61,15 +118,36 @@ local chunksUntilFork = 0
 local function pickNextFamily(): (string, boolean, boolean)
 	local isFirstOfRun = false
 	if remainingInFamily <= 0 then
-		local candidates = {}
-		for _, family in ROAD_FAMILIES do
-			if family ~= currentFamily then
-				table.insert(candidates, family)
+		for name, remaining in familyCooldowns do
+			familyCooldowns[name] = if remaining > 1 then remaining - 1 else nil
+		end
+
+		local function isEligible(entry): boolean
+			return entry.Name ~= currentFamily and familyCooldowns[entry.Name] == nil
+		end
+
+		local totalWeight = 0
+		for _, entry in ROAD_FAMILY_WEIGHTS do
+			if isEligible(entry) then
+				totalWeight += entry.Weight
 			end
 		end
 
-		currentFamily = candidates[math.random(1, #candidates)]
-		remainingInFamily = math.random(4, 8)
+		local roll = math.random() * totalWeight
+		for _, entry in ROAD_FAMILY_WEIGHTS do
+			if isEligible(entry) then
+				roll -= entry.Weight
+				if roll <= 0 then
+					currentFamily = entry.Name
+					remainingInFamily = math.random(entry.MinRun, entry.MaxRun)
+					if entry.CooldownRuns > 0 then
+						familyCooldowns[entry.Name] = entry.CooldownRuns + 1
+					end
+					break
+				end
+			end
+		end
+
 		isFirstOfRun = true
 	end
 
@@ -109,7 +187,9 @@ local function addBoulder(parent: Instance, position: Vector3, scale: number)
 	boulder.Size = Vector3.new(5.5, 4, 6.5) * scale
 	boulder.Position = position
 	boulder.Orientation = Vector3.new(12, (position.Z * 17) % 180, 8)
-	boulder.Color = Color3.fromRGB(103, 78, 56)
+	-- Seeded off the boulder's own position so a field reads as mixed rock
+	-- rather than a row of identical props.
+	boulder.Color = variegate(ROAD_COLORS.CanyonRock, position.Z * 0.05 + position.X, 0.4)
 	boulder.Material = Enum.Material.Slate
 	boulder.Parent = parent
 	CollectionService:AddTag(boulder, "RoadHardBoundary")
@@ -147,70 +227,146 @@ local function addSockets(chunk: Model, centerZ: number, chunkLength: number)
 	socketEnd.Parent = chunk
 end
 
-local function configureStonyDesertChunk(chunk: Model, index: number, centerZ: number)
+-- Shared layout for the ground-level families: wide drivable terrain with a
+-- clear good-ground road down the middle, plus the occasional hazard sitting
+-- on that road. Hazard cadence is index-driven rather than random so a run
+-- is reproducible and the smoke test can rely on seeing each surface type.
+local function addGroundRoad(
+	chunk: Model,
+	index: number,
+	centerZ: number,
+	terrainName: string,
+	terrainProfile: string,
+	terrainColor: Color3,
+	terrainMaterial: Enum.Material
+)
 	local road = WorldConfig.Road
 	local center = CFrame.new(0, ROAD_Y, centerZ)
-	local variant = index % 4
-	local isAsphalt = variant == 0
 
 	makeSurface(
 		chunk,
-		"LooseStone",
+		terrainName,
 		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
 		center * CFrame.new(0, -0.55, 0),
-		"LooseStone",
-		ROAD_COLORS.LooseStone,
-		Enum.Material.Slate
+		terrainProfile,
+		variegate(terrainColor, index, 0.35),
+		terrainMaterial
 	)
 
+	local isAsphalt = index % 4 == 0
 	makeSurface(
 		chunk,
 		if isAsphalt then "AsphaltRoad" else "WornTrack",
-		Vector3.new(48, 0.25, road.ChunkLength),
+		Vector3.new(ROAD_SURFACE_WIDTH, 0.25, road.ChunkLength),
 		center * CFrame.new(0, 0.08, 0),
 		if isAsphalt then "Asphalt" else "WornDirt",
-		if isAsphalt then ROAD_COLORS.Asphalt else ROAD_COLORS.WornDirt,
+		if isAsphalt then ROAD_COLORS.Asphalt else variegate(ROAD_COLORS.WornDirt, index * 3, 0.22),
 		if isAsphalt then Enum.Material.Asphalt else Enum.Material.Ground
 	)
 
-	if variant == 1 then
+	if index % 3 == 1 then
 		local mud = makeSurface(
 			chunk,
 			"MudPatch",
-			Vector3.new(28, 0.18, 90),
-			center * CFrame.new(-7, 0.24, -40),
+			MUD_PATCH_SIZE,
+			center * CFrame.new(-8, 0.24, -60),
 			"Mud",
 			ROAD_COLORS.Mud,
 			Enum.Material.Mud
 		)
 		mud:SetAttribute("HazardType", "Mud")
-	elseif variant == 2 then
+	end
+
+	if index % 5 == 2 then
 		local oil = makeSurface(
 			chunk,
 			"OilSlick",
-			Vector3.new(18, 0.08, 52),
-			center * CFrame.new(8, 0.29, -15),
+			Vector3.new(15, 0.08, 34),
+			center * CFrame.new(7, 0.29, 40),
 			"Oil",
 			ROAD_COLORS.Oil,
 			Enum.Material.SmoothPlastic
 		)
 		oil.Transparency = 0.12
 		oil:SetAttribute("HazardType", "Oil")
-	elseif variant == 3 then
+	end
+
+	if index % 4 == 3 then
 		addFuelPickup(chunk, center * CFrame.new(-13, 2.25, -30))
 	end
 
+	chunk:SetAttribute("PreferredLaneX", 0)
+end
+
+-- Open stony plain: the road threads between scattered boulder fields that
+-- are hard boundaries, so leaving the road is possible but has to be picked
+-- carefully rather than driven blindly.
+local function configureBoulderPlainChunk(chunk: Model, index: number, centerZ: number)
+	local road = WorldConfig.Road
+	addGroundRoad(
+		chunk,
+		index,
+		centerZ,
+		"LooseStone",
+		"LooseStone",
+		ROAD_COLORS.LooseStone,
+		Enum.Material.Slate
+	)
+
+	local edge = road.ChunkWidth / 2
+	local roadEdge = ROAD_SURFACE_WIDTH / 2
 	for _, side in { -1, 1 } do
-		local baseX = side * (road.ChunkWidth / 2 - 8)
-		addBoulder(
+		for cluster = 0, 2 do
+			-- Spread across the runoff, never onto the road itself.
+			local spread = roadEdge
+				+ 14
+				+ ((index * 37 + cluster * 53) % math.max(1, edge - roadEdge - 20))
+			addBoulder(
+				chunk,
+				Vector3.new(side * spread, 1.6, centerZ - 180 + cluster * 160 + side * 24),
+				0.7 + ((index + cluster) % 3) * 0.2
+			)
+		end
+	end
+end
+
+-- Open sand: fewer obstacles and longer sightlines than the boulder plain,
+-- but the runoff is soft (low grip, mild bogging) so pushing wide to cut a
+-- corner costs speed.
+local function configureSandyDesertChunk(chunk: Model, index: number, centerZ: number)
+	-- Alternating stretches of orange sand and bleached salt pan, so a desert
+	-- run reads as varied country rather than one endless tone. The salt is
+	-- also the one fast off-road surface, which changes how the section plays
+	-- and not just how it looks.
+	local isSaltPan = (index // 2) % 2 == 1
+	if isSaltPan then
+		addGroundRoad(
 			chunk,
-			Vector3.new(baseX, 1.6, centerZ - 120 + side * 32),
-			0.7 + (index % 3) * 0.15
+			index,
+			centerZ,
+			"SaltPan",
+			"SaltPan",
+			ROAD_COLORS.SaltPan,
+			Enum.Material.Salt
 		)
-		addBoulder(chunk, Vector3.new(baseX - side * 7, 1.2, centerZ + 145 - side * 18), 0.55)
+	else
+		addGroundRoad(
+			chunk,
+			index,
+			centerZ,
+			"SandFlat",
+			"Sand",
+			ROAD_COLORS.Sand,
+			Enum.Material.Sand
+		)
 	end
 
-	chunk:SetAttribute("PreferredLaneX", 0)
+	local side = if index % 2 == 0 then -1 else 1
+	addBoulder(
+		chunk,
+		Vector3.new(side * (ROAD_SURFACE_WIDTH / 2 + 30), 1.4, centerZ - 60),
+		0.6 + (index % 3) * 0.2
+	)
 end
 
 -- Narrow choke-point corridor with real wall collision geometry (GDD 9.2):
@@ -226,7 +382,7 @@ local function configureCanyonChunk(chunk: Model, index: number, centerZ: number
 		Vector3.new(CANYON_WIDTH, 1, road.ChunkLength),
 		center * CFrame.new(0, -0.4, 0),
 		"WornDirt",
-		ROAD_COLORS.WornDirt,
+		variegate(ROAD_COLORS.WornDirt, index * 5, 0.2),
 		Enum.Material.Ground
 	)
 
@@ -237,7 +393,9 @@ local function configureCanyonChunk(chunk: Model, index: number, centerZ: number
 		wall.Size = Vector3.new(16, CANYON_WALL_HEIGHT, road.ChunkLength)
 		wall.CFrame = center
 			* CFrame.new(side * (CANYON_WIDTH / 2 + 8), CANYON_WALL_HEIGHT / 2 - 3, 0)
-		wall.Color = ROAD_COLORS.CanyonRock
+		-- Each wall shifted independently so a canyon has banded strata
+		-- rather than two flat slabs of identical colour.
+		wall.Color = variegate(ROAD_COLORS.CanyonRock, index * 2 + side, 0.42)
 		wall.Material = Enum.Material.Rock
 		wall.Parent = chunk
 		CollectionService:AddTag(wall, "RoadHardBoundary")
@@ -325,13 +483,15 @@ local function configureHighwayRampChunk(chunk: Model, centerZ: number, rampingU
 	chunk:SetAttribute("PreferredLaneX", 0)
 end
 
--- Wide, mostly-mud expanse with a firmer path threaded through it (GDD 9.3):
--- straying off the path costs grip and builds BogLevel through the existing
--- VehiclePhysics surface-profile handling, no new physics code needed.
+-- A genuine mudflat biome (GDD 9.3), distinct from the small mud patches
+-- that sit on the ordinary road: here the mud is the terrain and the good
+-- ground is a firm path threaded through it, so the route-reading is the
+-- point. Weighted low so crossing one is an occasional event rather than
+-- the default texture of a run.
 local function configureMudflatChunk(chunk: Model, index: number, centerZ: number)
 	local road = WorldConfig.Road
 	local center = CFrame.new(0, ROAD_Y, centerZ)
-	local pathOffset = if index % 2 == 0 then -18 else 18
+	local pathOffset = if index % 2 == 0 then -16 else 16
 
 	makeSurface(
 		chunk,
@@ -339,17 +499,17 @@ local function configureMudflatChunk(chunk: Model, index: number, centerZ: numbe
 		Vector3.new(road.ChunkWidth, 1, road.ChunkLength),
 		center * CFrame.new(0, -0.5, 0),
 		"Mud",
-		ROAD_COLORS.Mud,
+		variegate(ROAD_COLORS.Mud, index, 0.25),
 		Enum.Material.Mud
 	)
 
 	makeSurface(
 		chunk,
 		"FirmPath",
-		Vector3.new(22, 0.22, road.ChunkLength),
+		Vector3.new(ROAD_SURFACE_WIDTH, 0.22, road.ChunkLength),
 		center * CFrame.new(pathOffset, 0.05, 0),
 		"WornDirt",
-		ROAD_COLORS.WornDirt,
+		variegate(ROAD_COLORS.WornDirt, index * 3, 0.22),
 		Enum.Material.Ground
 	)
 
@@ -421,6 +581,8 @@ local function configureChunk(chunk: Model, index: number)
 		chunk:SetAttribute("RoadFamily", family)
 		if family == "Canyon" then
 			configureCanyonChunk(chunk, index, centerZ)
+		elseif family == "SandyDesert" then
+			configureSandyDesertChunk(chunk, index, centerZ)
 		elseif family == "Mudflat" then
 			configureMudflatChunk(chunk, index, centerZ)
 		elseif family == "RaisedHighway" then
@@ -432,7 +594,7 @@ local function configureChunk(chunk: Model, index: number)
 				configureHighwayChunk(chunk, index, centerZ)
 			end
 		else
-			configureStonyDesertChunk(chunk, index, centerZ)
+			configureBoulderPlainChunk(chunk, index, centerZ)
 		end
 	end
 
@@ -537,8 +699,11 @@ function RoadService.Start()
 	CollectionService:AddTag(killPlane, "RoadLethalZone")
 
 	chunks = {}
-	currentFamily = "StonyDesert"
+	-- Every run opens on a stretch of boulder plain: forgiving terrain with
+	-- clear sightlines, per the design doc's pressure curve (GDD 4.3).
+	currentFamily = "BoulderPlain"
 	remainingInFamily = math.random(4, 8)
+	familyCooldowns = {}
 	chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 	nextChunkIndex = WorldConfig.Road.InitialChunkCount
 	for index = 0, WorldConfig.Road.InitialChunkCount - 1 do

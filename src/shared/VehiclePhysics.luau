@@ -230,9 +230,20 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	end
 	state.BogLevel = math.clamp(state.BogLevel, 0, 1)
 
+	-- Per-vehicle top-speed cap. Throttle only scales acceleration, so two
+	-- vehicles sharing a VehicleConfig converge on the same top speed no
+	-- matter how gently one of them drives - which made an AI that spawned
+	-- ahead of the player literally impossible to catch. AI vehicles set
+	-- this below 1 so the player can actually run them down.
+	local speedScaleAttribute = vehicle:GetAttribute("MaxSpeedScale")
+	local speedScale = if typeof(speedScaleAttribute) == "number"
+		then math.clamp(speedScaleAttribute, 0.1, 1)
+		else 1
+
 	local bogDriveScale = 1 - state.BogLevel * 0.82
 	local surfaceDriveScale = math.clamp(grip, 0.2, 1.05) / math.max(fuelMultiplier, 0.8)
 	local maxForwardSpeed = config.MaxForwardSpeed
+		* speedScale
 		* bogDriveScale
 		/ math.max(1, (fuelMultiplier - 1) * 1.4 + 1)
 	local maxReverseSpeed = config.MaxReverseSpeed * math.max(0.35, bogDriveScale)

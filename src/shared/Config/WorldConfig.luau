@@ -3,7 +3,11 @@
 return {
 	Road = {
 		ChunkLength = 512,
-		ChunkWidth = 96,
+		-- Wide enough to turn around in. The drivable track down the middle
+		-- is much narrower; the rest is rough runoff that costs grip but
+		-- gives room to swing a U-turn and re-engage rather than being
+		-- committed to one direction forever.
+		ChunkWidth = 230,
 		InitialChunkCount = 21,
 		ChunksBehind = 8,
 		ChunksAhead = 12,
