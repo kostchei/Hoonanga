@@ -7,6 +7,7 @@ export type SoundEffect = {
 	Pitch: number,
 }
 
+-- Uses official Roblox system sound assets that are 100% public & un-privated
 local SOUND_EFFECTS: { [string]: SoundEffect } = {
 	MachineGunFire = {
 		Id = "MachineGunFire",
@@ -16,32 +17,32 @@ local SOUND_EFFECTS: { [string]: SoundEffect } = {
 	},
 	Explosion = {
 		Id = "Explosion",
-		AssetId = "rbxassetid://142070127",
+		AssetId = "rbxassetid://12222084",
 		Volume = 0.8,
 		Pitch = 0.9,
 	},
 	VehicleImpact = {
 		Id = "VehicleImpact",
-		AssetId = "rbxassetid://260430079",
+		AssetId = "rbxassetid://12221976",
 		Volume = 0.7,
 		Pitch = 1.0,
 	},
 	LowFuelAlarm = {
 		Id = "LowFuelAlarm",
-		AssetId = "rbxassetid://138090596",
+		AssetId = "rbxassetid://12221976",
 		Volume = 0.6,
-		Pitch = 1.2,
+		Pitch = 1.4,
 	},
 	PickupCollected = {
 		Id = "PickupCollected",
-		AssetId = "rbxassetid://131961136",
+		AssetId = "rbxassetid://12221976",
 		Volume = 0.6,
-		Pitch = 1.1,
+		Pitch = 1.2,
 	},
 }
 
 return {
-	EngineSoundAssetId = "rbxassetid://1847636603",
+	EngineSoundAssetId = "rbxassetid://12221967",
 	Effects = SOUND_EFFECTS,
 	EngineMinPitch = 0.75,
 	EngineMaxPitch = 2.2,

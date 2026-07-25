@@ -14,10 +14,18 @@ local playAudioRemote = remotesFolder:WaitForChild("PlayAudioEffect") :: RemoteE
 local engineSound: Sound? = nil
 local activeVehicle: Model? = nil
 
-local function safePlaySound(sound: Sound)
-	pcall(function()
-		sound:Play()
+local function safeCreateSound(assetId: string, volume: number, pitch: number): Sound?
+	if not assetId or assetId == "" then
+		return nil
+	end
+	local ok, sound = pcall(function()
+		local snd = Instance.new("Sound")
+		snd.SoundId = assetId
+		snd.Volume = volume
+		snd.Pitch = pitch
+		return snd
 	end)
+	return if ok and sound then sound else nil
 end
 
 local AudioController = {}
@@ -29,10 +37,10 @@ function AudioController.Start()
 			return
 		end
 
-		local sound = Instance.new("Sound")
-		sound.SoundId = effect.AssetId
-		sound.Volume = effect.Volume
-		sound.Pitch = effect.Pitch
+		local sound = safeCreateSound(effect.AssetId, effect.Volume, effect.Pitch)
+		if not sound then
+			return
+		end
 
 		if position then
 			local part = Instance.new("Part")
@@ -51,7 +59,9 @@ function AudioController.Start()
 				sound:Destroy()
 			end)
 		end
-		safePlaySound(sound)
+		pcall(function()
+			sound:Play()
+		end)
 	end)
 
 	RunService.RenderStepped:Connect(function()
@@ -71,15 +81,20 @@ function AudioController.Start()
 			end
 
 			if vehicle and vehicle.PrimaryPart then
-				local sound = Instance.new("Sound")
-				sound.Name = "EngineRPM"
-				sound.Looped = true
-				sound.Volume = 0.45
-				sound.Pitch = AudioConfig.EngineMinPitch
-				sound.SoundId = AudioConfig.EngineSoundAssetId or "rbxassetid://1847636603"
-				sound.Parent = vehicle.PrimaryPart
-				safePlaySound(sound)
-				engineSound = sound
+				local sound = safeCreateSound(
+					AudioConfig.EngineSoundAssetId,
+					0.45,
+					AudioConfig.EngineMinPitch
+				)
+				if sound then
+					sound.Name = "EngineRPM"
+					sound.Looped = true
+					sound.Parent = vehicle.PrimaryPart
+					pcall(function()
+						sound:Play()
+					end)
+					engineSound = sound
+				end
 			end
 		end
 
@@ -95,15 +110,16 @@ end
 function AudioController.PlayLocalEffect(effectId: string)
 	local effect = AudioConfig.Effects[effectId]
 	if effect then
-		local sound = Instance.new("Sound")
-		sound.SoundId = effect.AssetId
-		sound.Volume = effect.Volume
-		sound.Pitch = effect.Pitch
-		sound.Parent = Workspace
-		safePlaySound(sound)
-		sound.Ended:Connect(function()
-			sound:Destroy()
-		end)
+		local sound = safeCreateSound(effect.AssetId, effect.Volume, effect.Pitch)
+		if sound then
+			sound.Parent = Workspace
+			pcall(function()
+				sound:Play()
+			end)
+			sound.Ended:Connect(function()
+				sound:Destroy()
+			end)
+		end
 	end
 end
 
