@@ -29,10 +29,11 @@ function GarageController.Start()
 
 	local panel = Instance.new("Frame")
 	panel.Name = "GaragePanel"
-	panel.Position = UDim2.fromOffset(22, 60)
-	panel.Size = UDim2.fromOffset(360, 240)
+	panel.AnchorPoint = Vector2.new(0.5, 0.5)
+	panel.Position = UDim2.fromScale(0.5, 0.45)
+	panel.Size = UDim2.fromOffset(400, 260)
 	panel.BackgroundColor3 = Color3.fromRGB(15, 18, 19)
-	panel.BackgroundTransparency = 0.15
+	panel.BackgroundTransparency = 0.1
 	panel.BorderSizePixel = 0
 	panel.Parent = gui
 
@@ -40,11 +41,11 @@ function GarageController.Start()
 	title.Name = "Title"
 	title.Text = "GARAGE & PROGRESSION [G]"
 	title.Font = Enum.Font.GothamBold
-	title.TextSize = 15
+	title.TextSize = 16
 	title.TextColor3 = Color3.fromRGB(255, 103, 65)
 	title.BackgroundTransparency = 1
-	title.Position = UDim2.fromOffset(12, 10)
-	title.Size = UDim2.fromOffset(260, 24)
+	title.Position = UDim2.fromOffset(16, 12)
+	title.Size = UDim2.fromOffset(280, 24)
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = panel
 
@@ -52,12 +53,12 @@ function GarageController.Start()
 	closeBtn.Name = "CloseButton"
 	closeBtn.Text = "X HIDE [G]"
 	closeBtn.Font = Enum.Font.GothamBold
-	closeBtn.TextSize = 11
+	closeBtn.TextSize = 12
 	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 	closeBtn.BackgroundColor3 = Color3.fromRGB(184, 73, 42)
 	closeBtn.BorderSizePixel = 0
-	closeBtn.Position = UDim2.fromOffset(276, 10)
-	closeBtn.Size = UDim2.fromOffset(72, 24)
+	closeBtn.Position = UDim2.fromOffset(304, 12)
+	closeBtn.Size = UDim2.fromOffset(80, 24)
 	closeBtn.Parent = panel
 
 	local function hideGarage()
@@ -93,11 +94,11 @@ function GarageController.Start()
 	infoLabel.Name = "Info"
 	infoLabel.Text = "Scrap: 0 | Class: Ute"
 	infoLabel.Font = Enum.Font.GothamMedium
-	infoLabel.TextSize = 13
+	infoLabel.TextSize = 14
 	infoLabel.TextColor3 = Color3.fromRGB(238, 220, 189)
 	infoLabel.BackgroundTransparency = 1
-	infoLabel.Position = UDim2.fromOffset(12, 38)
-	infoLabel.Size = UDim2.fromOffset(336, 130)
+	infoLabel.Position = UDim2.fromOffset(16, 44)
+	infoLabel.Size = UDim2.fromOffset(368, 130)
 	infoLabel.TextXAlignment = Enum.TextXAlignment.Left
 	infoLabel.TextYAlignment = Enum.TextYAlignment.Top
 	infoLabel.Parent = panel
@@ -106,12 +107,12 @@ function GarageController.Start()
 	readyButton.Name = "ReadyButton"
 	readyButton.Text = "READY FOR RUN"
 	readyButton.Font = Enum.Font.GothamBold
-	readyButton.TextSize = 14
+	readyButton.TextSize = 15
 	readyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 	readyButton.BackgroundColor3 = Color3.fromRGB(184, 73, 42)
 	readyButton.BorderSizePixel = 0
-	readyButton.Position = UDim2.fromOffset(12, 180)
-	readyButton.Size = UDim2.fromOffset(336, 40)
+	readyButton.Position = UDim2.fromOffset(16, 196)
+	readyButton.Size = UDim2.fromOffset(368, 44)
 	readyButton.Parent = panel
 
 	readyButton.MouseButton1Click:Connect(function()
@@ -139,10 +140,13 @@ function GarageController.Start()
 		if activeVehicle then
 			if not isManuallyOpened then
 				gui.Enabled = false
+			else
+				CameraController.SetMouseUnlocked(true)
 			end
 		else
 			if not isManuallyHidden then
 				gui.Enabled = true
+				CameraController.SetMouseUnlocked(true)
 			end
 		end
 	end)
