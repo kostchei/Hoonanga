@@ -2,6 +2,9 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
 local remotesFolder = ReplicatedStorage:WaitForChild("HoonangaRemotes")
@@ -9,6 +12,7 @@ local setReadyRemote = remotesFolder:WaitForChild("SetPlayerReady") :: RemoteEve
 local progressionUpdatedRemote = remotesFolder:WaitForChild("ProgressionUpdated") :: RemoteEvent
 
 local isReady = false
+local isManuallyHidden = false
 
 local GarageController = {}
 
@@ -37,9 +41,26 @@ function GarageController.Start()
 	title.TextColor3 = Color3.fromRGB(255, 103, 65)
 	title.BackgroundTransparency = 1
 	title.Position = UDim2.fromOffset(12, 10)
-	title.Size = UDim2.fromOffset(336, 24)
+	title.Size = UDim2.fromOffset(260, 24)
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = panel
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Name = "CloseButton"
+	closeBtn.Text = "X HIDE"
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 12
+	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(184, 73, 42)
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Position = UDim2.fromOffset(280, 10)
+	closeBtn.Size = UDim2.fromOffset(68, 24)
+	closeBtn.Parent = panel
+
+	closeBtn.MouseButton1Click:Connect(function()
+		isManuallyHidden = true
+		gui.Enabled = false
+	end)
 
 	local infoLabel = Instance.new("TextLabel")
 	infoLabel.Name = "Info"
@@ -49,7 +70,7 @@ function GarageController.Start()
 	infoLabel.TextColor3 = Color3.fromRGB(238, 220, 189)
 	infoLabel.BackgroundTransparency = 1
 	infoLabel.Position = UDim2.fromOffset(12, 38)
-	infoLabel.Size = UDim2.fromOffset(336, 40)
+	infoLabel.Size = UDim2.fromOffset(336, 130)
 	infoLabel.TextXAlignment = Enum.TextXAlignment.Left
 	infoLabel.TextYAlignment = Enum.TextYAlignment.Top
 	infoLabel.Parent = panel
@@ -83,6 +104,18 @@ function GarageController.Start()
 				profile.EquippedClass or "Ute",
 				profile.EquippedCosmetic or "Default"
 			)
+		end
+	end)
+
+	RunService.RenderStepped:Connect(function()
+		local activeVehicle = VehicleLocator.ForPlayer(localPlayer)
+		if activeVehicle then
+			-- Auto-hide Garage menu while active vehicle is driving
+			gui.Enabled = false
+		else
+			if not isManuallyHidden then
+				gui.Enabled = true
+			end
 		end
 	end)
 end

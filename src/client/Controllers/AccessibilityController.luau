@@ -6,12 +6,15 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local AccessibilityConfig = require(ReplicatedStorage.Shared.Config.AccessibilityConfig)
+local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 
 local currentSettings: AccessibilityConfig.AccessibilitySettings =
 	AccessibilityConfig.DefaultSettings
+
+local isManuallyHidden = false
 
 local AccessibilityController = {}
 
@@ -40,9 +43,26 @@ function AccessibilityController.Start()
 	title.TextColor3 = Color3.fromRGB(255, 103, 65)
 	title.BackgroundTransparency = 1
 	title.Position = UDim2.fromOffset(12, 8)
-	title.Size = UDim2.fromOffset(336, 20)
+	title.Size = UDim2.fromOffset(260, 20)
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = panel
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Name = "CloseButton"
+	closeBtn.Text = "X HIDE"
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 11
+	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(184, 73, 42)
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Position = UDim2.fromOffset(280, 8)
+	closeBtn.Size = UDim2.fromOffset(68, 20)
+	closeBtn.Parent = panel
+
+	closeBtn.MouseButton1Click:Connect(function()
+		isManuallyHidden = true
+		gui.Enabled = false
+	end)
 
 	local fovLabel = Instance.new("TextLabel")
 	fovLabel.Name = "FOVLabel"
@@ -81,6 +101,16 @@ function AccessibilityController.Start()
 	RunService.RenderStepped:Connect(function()
 		if camera and camera.FieldOfView ~= currentSettings.FieldOfView then
 			camera.FieldOfView = currentSettings.FieldOfView
+		end
+
+		local activeVehicle = VehicleLocator.ForPlayer(localPlayer)
+		if activeVehicle then
+			-- Auto-hide accessibility panel while active vehicle is driving
+			gui.Enabled = false
+		else
+			if not isManuallyHidden then
+				gui.Enabled = true
+			end
 		end
 	end)
 end
