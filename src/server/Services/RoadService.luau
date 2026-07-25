@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
+local EnvironmentConfig = require(ReplicatedStorage.Shared.Config.EnvironmentConfig)
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 local ConvoyService = require(script.Parent.ConvoyService)
@@ -1101,6 +1102,8 @@ local function configureChunk(chunk: Model, index: number): ChunkRecord
 	chunk:SetAttribute("ChunkIndex", index)
 
 	local family, isFirstOfRun, isLastOfRun = decideChunk()
+	local biome = EnvironmentConfig.Biomes[family] or EnvironmentConfig.Biomes.BoulderPlain
+	chunk:SetAttribute("EnvironmentBiome", biome.Name)
 	-- Spawn positions are authored in world space inside chunk zero. Keeping
 	-- the opening chunk straight guarantees those positions remain on the
 	-- road and prevents the first input a player makes from being a ninety.
