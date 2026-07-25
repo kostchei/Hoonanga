@@ -26,9 +26,16 @@ local WHEEL_OFFSETS = {
 	RR = Vector3.new(3.05, -1.05, 4.65),
 }
 
-local pickupAssetAttempted = false
+-- These are "loaded" (the fetch has finished, successfully or not) rather
+-- than "attempted" (the fetch has started). LoadAssetAsync yields on the
+-- network, so a caller arriving during another caller's in-flight fetch has
+-- to wait for it instead of sailing past an already-started flag and
+-- finding an empty cache - see loadPickupBodyTemplates.
+local pickupAssetLoaded = false
+local pickupAssetLoading = false
 local pickupBodyTemplates: { [string]: Model } = {}
-local turretAssetAttempted = false
+local turretAssetLoaded = false
+local turretAssetLoading = false
 local turretAssetTemplate: Model? = nil
 
 local function makePart(name: string, size: Vector3, color: Color3, material: Enum.Material): Part
@@ -101,14 +108,26 @@ local function sanitizePickupBody(body: Model)
 end
 
 local function loadPickupBodyTemplates()
-	if pickupAssetAttempted then
+	if pickupAssetLoaded then
 		return
 	end
-	pickupAssetAttempted = true
+	if pickupAssetLoading then
+		repeat
+			task.wait()
+		until pickupAssetLoaded
+		return
+	end
+	pickupAssetLoading = true
 
 	local success, result = pcall(function()
 		return AssetService:LoadAssetAsync(PICKUP_ASSET_ID)
 	end)
+
+	-- Release the gate before any early return, so a failed fetch can never
+	-- leave a concurrent caller waiting forever.
+	pickupAssetLoaded = true
+	pickupAssetLoading = false
+
 	if not success or not result or not result:IsA("Model") then
 		warn(
 			string.format(
@@ -189,14 +208,24 @@ local function mountPickupBody(vehicle: Model, chassis: Part, bodyColor: Color3)
 end
 
 local function getTurretAssetTemplate(): Model?
-	if turretAssetAttempted then
+	if turretAssetLoaded then
 		return turretAssetTemplate
 	end
-	turretAssetAttempted = true
+	if turretAssetLoading then
+		repeat
+			task.wait()
+		until turretAssetLoaded
+		return turretAssetTemplate
+	end
+	turretAssetLoading = true
 
 	local success, result = pcall(function()
 		return AssetService:LoadAssetAsync(TURRET_ASSET_ID)
 	end)
+
+	turretAssetLoaded = true
+	turretAssetLoading = false
+
 	if not success or not result or not result:IsA("Model") then
 		warn(
 			string.format(
