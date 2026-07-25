@@ -80,6 +80,25 @@ expect(
 	familyCount >= 2,
 	"expected at least 2 road families across the initial chunks, found " .. familyCount
 )
+expect(
+	seenFamilies.Fork == true,
+	"no fork chunk was generated within the first 21 chunks (fork interval is 10-16)"
+)
+
+local forkChunk
+for _, chunkModel in roadChunks:GetChildren() do
+	if chunkModel:GetAttribute("RoadFamily") == "Fork" then
+		forkChunk = chunkModel
+		break
+	end
+end
+expect(forkChunk ~= nil, "fork chunk marked in seenFamilies but not found by lookup")
+expect(forkChunk:FindFirstChild("ForkLaneLeft") ~= nil, "fork chunk has no left lane")
+expect(forkChunk:FindFirstChild("ForkLaneRight") ~= nil, "fork chunk has no right lane")
+expect(
+	forkChunk:FindFirstChild("FuelPickup") ~= nil,
+	"fork chunk's left-lane fuel tradeoff is missing"
+)
 
 local vehicles = world:FindFirstChild("Vehicles")
 expect(vehicles ~= nil, "Vehicles folder is missing")

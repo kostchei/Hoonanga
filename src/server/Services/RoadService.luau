@@ -31,12 +31,25 @@ local ROAD_FAMILIES = { "StonyDesert", "Canyon", "Mudflat" }
 local CANYON_WIDTH = 34
 local CANYON_WALL_HEIGHT = 60
 
+-- A fork is one wide chunk split into two parallel, differently-hazarded
+-- lanes with a boulder line down the middle forcing the player to commit to
+-- one side, rather than GDD 8.7's full multi-chunk diverge/reconverge
+-- branch geometry - that needs a chunk heading/curvature system this
+-- service doesn't have yet. This still delivers the actual design goal (a
+-- real route choice with a real tradeoff) with the existing straight-corridor
+-- chunk model, and reconverges trivially since the lanes never physically
+-- separated.
+local FORK_LANE_WIDTH = 38
+local FORK_MIN_INTERVAL = 10
+local FORK_MAX_INTERVAL = 16
+
 local chunks: { ChunkRecord } = {}
 local chunkFolder: Folder
 local nextChunkIndex = 0
 local running = false
 local currentFamily = "StonyDesert"
 local remainingInFamily = 0
+local chunksUntilFork = 0
 
 local function pickNextFamily(): string
 	if remainingInFamily > 0 then
@@ -263,20 +276,61 @@ local function configureMudflatChunk(chunk: Model, index: number, centerZ: numbe
 	end
 end
 
+-- Left lane trades grip for a fuel pickup, right lane keeps normal grip and
+-- offers nothing - a direct instance of GDD 8.7's example tradeoff ("exposed
+-- highway with fuel versus protected canyon without fuel").
+local function configureForkChunk(chunk: Model, centerZ: number)
+	local center = CFrame.new(0, ROAD_Y, centerZ)
+	local laneOffset = FORK_LANE_WIDTH / 2 + 10
+
+	local leftLane = makeSurface(
+		chunk,
+		"ForkLaneLeft",
+		Vector3.new(FORK_LANE_WIDTH, 0.9, WorldConfig.Road.ChunkLength),
+		center * CFrame.new(-laneOffset, -0.4, 0),
+		"Mud",
+		ROAD_COLORS.Mud,
+		Enum.Material.Mud
+	)
+	leftLane:SetAttribute("HazardType", "Mud")
+	addFuelPickup(chunk, center * CFrame.new(-laneOffset, 2.25, 0))
+
+	makeSurface(
+		chunk,
+		"ForkLaneRight",
+		Vector3.new(FORK_LANE_WIDTH, 1, WorldConfig.Road.ChunkLength),
+		center * CFrame.new(laneOffset, -0.55, 0),
+		"LooseStone",
+		ROAD_COLORS.LooseStone,
+		Enum.Material.Slate
+	)
+
+	for offsetZ = -1, 1 do
+		addBoulder(chunk, Vector3.new(0, 2, centerZ + offsetZ * 150), 0.9)
+	end
+end
+
 local function configureChunk(chunk: Model, index: number)
 	local road = WorldConfig.Road
 	local centerZ = -(index * road.ChunkLength)
-	local family = pickNextFamily()
 	chunk.Name = string.format("Chunk_%04d", index)
 	chunk:SetAttribute("ChunkIndex", index)
-	chunk:SetAttribute("RoadFamily", family)
 
-	if family == "Canyon" then
-		configureCanyonChunk(chunk, index, centerZ)
-	elseif family == "Mudflat" then
-		configureMudflatChunk(chunk, index, centerZ)
+	if chunksUntilFork <= 0 then
+		chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
+		chunk:SetAttribute("RoadFamily", "Fork")
+		configureForkChunk(chunk, centerZ)
 	else
-		configureStonyDesertChunk(chunk, index, centerZ)
+		chunksUntilFork -= 1
+		local family = pickNextFamily()
+		chunk:SetAttribute("RoadFamily", family)
+		if family == "Canyon" then
+			configureCanyonChunk(chunk, index, centerZ)
+		elseif family == "Mudflat" then
+			configureMudflatChunk(chunk, index, centerZ)
+		else
+			configureStonyDesertChunk(chunk, index, centerZ)
+		end
 	end
 
 	addSockets(chunk, centerZ, road.ChunkLength)
@@ -382,6 +436,7 @@ function RoadService.Start()
 	chunks = {}
 	currentFamily = "StonyDesert"
 	remainingInFamily = math.random(4, 8)
+	chunksUntilFork = math.random(FORK_MIN_INTERVAL, FORK_MAX_INTERVAL)
 	nextChunkIndex = WorldConfig.Road.InitialChunkCount
 	for index = 0, WorldConfig.Road.InitialChunkCount - 1 do
 		table.insert(chunks, createChunk(index))
