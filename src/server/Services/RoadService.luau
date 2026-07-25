@@ -405,7 +405,9 @@ local function makeBarrier(
 	local segmentLength = length / count
 	local overlap = if chunkCurvature == 0
 		then 0
-		else width * math.abs(math.tan(chunkCurvature * segmentLength)) + 4
+		else (math.abs(xOffset) * 2 + width) * math.abs(
+			math.tan(chunkCurvature * segmentLength / 2)
+		) + 4
 
 	for index = 0, count - 1 do
 		local barrier = Instance.new("Part")
@@ -776,7 +778,7 @@ end
 -- missing on one side each chunk ("missing outer barrier" from the chunk
 -- idea list) so the exposure is asymmetric.
 local function configureHighwayChunk(chunk: Model, index: number)
-	makeStrip(
+	local deckParts = makeStrip(
 		chunk,
 		"HighwayDeck",
 		HIGHWAY_WIDTH,
@@ -787,6 +789,12 @@ local function configureHighwayChunk(chunk: Model, index: number)
 		ROAD_COLORS.Asphalt,
 		Enum.Material.Asphalt
 	)
+	for _, deck in deckParts do
+		-- The visual horizon belongs at desert-ground height. Treating this
+		-- elevated deck as ground raises the client-side desert plane until it
+		-- sits just beneath the bridge, making the intended fall disappear.
+		deck:SetAttribute("HorizonGround", false)
+	end
 
 	local railedSide = if index % 2 == 0 then -1 else 1
 	makeBarrier(
@@ -826,6 +834,7 @@ local function configureHighwayRampChunk(chunk: Model, rampingUp: boolean)
 	ramp.Color = ROAD_COLORS.Asphalt
 	ramp.Material = Enum.Material.Asphalt
 	ramp:SetAttribute("SurfaceProfile", "Asphalt")
+	ramp:SetAttribute("HorizonGround", false)
 	ramp.Parent = chunk
 	CollectionService:AddTag(ramp, "RoadSurface")
 
@@ -1090,7 +1099,10 @@ local function configureChunk(chunk: Model, index: number): ChunkRecord
 	chunk:SetAttribute("ChunkIndex", index)
 
 	local family, isFirstOfRun, isLastOfRun = decideChunk()
-	chunkCurvature = pickCurve(family) / length
+	-- Spawn positions are authored in world space inside chunk zero. Keeping
+	-- the opening chunk straight guarantees those positions remain on the
+	-- road and prevents the first input a player makes from being a ninety.
+	chunkCurvature = if index == 0 then 0 else pickCurve(family) / length
 	buildChunkGeometry(chunk, index, family, isFirstOfRun, isLastOfRun)
 
 	-- A curved chunk is always flat. Pitch and roll are applied to the chunk
@@ -1262,6 +1274,10 @@ function RoadService.GetLaneTarget(position: Vector3, lookAhead: number): Vector
 	end
 
 	local target = location.Distance + lookAhead
+	local first = chunks[1]
+	if first and target <= first.Distances[1] then
+		return (first.Frames[1] * CFrame.new(first.LaneX, 0, 0)).Position
+	end
 	for _, record in chunks do
 		local distances = record.Distances
 		if target < distances[1] or target > distances[#distances] then

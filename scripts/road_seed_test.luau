@@ -4,7 +4,7 @@
 --
 -- Generates the road twice from the same seed and once from a different one,
 -- comparing the decisions that actually shape a run: family sequence, road
--- elevation, and fork placement.
+-- elevation, curvature, and fork placement.
 
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -40,9 +40,10 @@ local function generate(seed: number): string
 		table.insert(
 			parts,
 			string.format(
-				"%s@%.2f",
+				"%s@%.2f/%.2f",
 				tostring(chunk:GetAttribute("RoadFamily")),
-				chunk:GetAttribute("GroundExitY") or 0
+				chunk:GetAttribute("GroundExitY") or 0,
+				chunk:GetAttribute("CurveDegrees") or 0
 			)
 		)
 	end

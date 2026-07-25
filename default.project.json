@@ -53,13 +53,27 @@
     "Lighting": {
       "$className": "Lighting",
       "$properties": {
-        "Ambient": [0.24, 0.19, 0.15],
-        "Brightness": 2.2,
-        "ClockTime": 16.5,
-        "EnvironmentDiffuseScale": 0.35,
-        "EnvironmentSpecularScale": 0.25,
-        "Technology": "Voxel",
-        "OutdoorAmbient": [0.47, 0.36, 0.27]
+        "Ambient": [0.19, 0.2, 0.25],
+        "Brightness": 2.6,
+        "ClockTime": 16.9,
+        "GeographicLatitude": -24,
+        "EnvironmentDiffuseScale": 0.5,
+        "EnvironmentSpecularScale": 0.4,
+        "ExposureCompensation": -0.15,
+        "Technology": "ShadowMap",
+        "OutdoorAmbient": [0.42, 0.47, 0.58]
+      },
+
+      "DesertAtmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Density": 0.22,
+          "Offset": 0.1,
+          "Color": [0.35, 0.62, 1.0],
+          "Decay": [0.68, 0.78, 0.92],
+          "Glare": 0.45,
+          "Haze": 0.9
+        }
       }
     }
   }

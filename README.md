@@ -71,6 +71,7 @@ scripts/run_studio_test.sh default.project.json scripts/studio_smoke_test.luau s
 | `scripts/road_recycle_test.luau` | `recycle` | `^\[RECYCLE\] PASS:` |
 | `scripts/road_seed_test.luau` | `seed` | `^\[SEED\] PASS:` |
 | `scripts/concurrent_vehicle_test.luau` | `concurrent` | `^\[CONCURRENT\] PASS:` |
+| `scripts/sky_test.luau` | `sky` | `^\[SKY\] PASS:` |
 
 See [the game design document](docs/GAME_DESIGN_DOCUMENT.md) for the agreed scope and milestone plan.
 

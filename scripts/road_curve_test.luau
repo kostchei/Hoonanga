@@ -67,6 +67,9 @@ for seed = 1, SEEDS do
 		local family = chunk:GetAttribute("RoadFamily")
 		local degrees = chunk:GetAttribute("CurveDegrees")
 		expect(typeof(degrees) == "number", "chunk has no CurveDegrees")
+		if chunk:GetAttribute("ChunkIndex") == 0 then
+			expect(degrees == 0, "opening/spawn chunk is curved")
+		end
 
 		if STRAIGHT_ONLY_FAMILIES[family] then
 			expect(

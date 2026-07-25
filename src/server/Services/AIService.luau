@@ -48,6 +48,20 @@ end
 -- the corner across the scenery.
 local ROAD_LOOK_AHEAD = 110
 
+local function imperfectSteer(steer: number, now: number): number
+	steer += math.noise(now * STEER_ERROR_RATE) * STEER_ERROR
+	return math.clamp(steer, -1, 1)
+end
+
+local function steerToward(chassis: BasePart, targetPosition: Vector3, fallbackSide: number): number
+	local localTarget = chassis.CFrame:PointToObjectSpace(targetPosition)
+	if localTarget.Z > 0 then
+		local side = if math.abs(localTarget.X) > 1 then localTarget.X else fallbackSide
+		return if side >= 0 then 1 else -1
+	end
+	return math.clamp(localTarget.X / 18, -1, 1)
+end
+
 -- Returns steer (-1..1) and throttle (-1..1). The enemy hunts the player
 -- rather than driving one-way down the road forever: once the player is
 -- behind it, it commits to a U-turn and comes back for another pass, which
@@ -63,13 +77,34 @@ local function calculateDriving(chassis: BasePart, target: Model?, now: number):
 		if not lookAhead then
 			return 0, 0.5
 		end
-		local localAhead = chassis.CFrame:PointToObjectSpace(lookAhead)
-		return math.clamp(localAhead.X / 18, -1, 1), 0.5
+		return imperfectSteer(steerToward(chassis, lookAhead, 1), now), 0.5
 	end
 
 	local targetPosition = target.PrimaryPart.Position
 	local distance = (targetPosition - chassis.Position).Magnitude
 	local localTarget = chassis.CFrame:PointToObjectSpace(targetPosition)
+	local roadLocation = RoadService.LocateOnPath(chassis.Position)
+	local targetRoadLocation = RoadService.LocateOnPath(targetPosition)
+
+	-- At long path separation, follow the road toward the player instead of
+	-- steering across the chord of a bend. On a ninety-degree chunk that chord
+	-- runs through the scenery; the road target keeps the enemy on the actual
+	-- drivable line while preserving its ability to turn around and hunt.
+	if roadLocation and targetRoadLocation then
+		local pathDelta = targetRoadLocation.Distance - roadLocation.Distance
+		if math.abs(pathDelta) > ENGAGE_RANGE then
+			local direction = if pathDelta >= 0 then 1 else -1
+			local roadTarget =
+				RoadService.GetLaneTarget(chassis.Position, ROAD_LOOK_AHEAD * direction)
+			if roadTarget then
+				local steer = steerToward(chassis, roadTarget, localTarget.X)
+				local roadTargetLocal = chassis.CFrame:PointToObjectSpace(roadTarget)
+				local throttle = if roadTargetLocal.Z > 0 then 0.45 else 1
+				return imperfectSteer(steer, now), throttle
+			end
+		end
+	end
+
 	-- Roblox LookVector points down -Z, so a positive local Z means the
 	-- player is behind us.
 	local targetIsBehind = localTarget.Z > 0
@@ -92,8 +127,7 @@ local function calculateDriving(chassis: BasePart, target: Model?, now: number):
 
 	-- Wandering steering error, so the enemy drifts and corrects like a
 	-- driver rather than tracking perfectly.
-	steer += math.noise(now * STEER_ERROR_RATE) * STEER_ERROR
-	return math.clamp(steer, -1, 1), throttle
+	return imperfectSteer(steer, now), throttle
 end
 
 -- GDD 13.5 combat AI: the enemy picks a weapon for the range it is at, which
