@@ -30,7 +30,7 @@ local profiles: { [string]: SurfaceProfile } = {
 		Grip = 0.55,
 		Drag = 1.8,
 		FuelUse = 1.35,
-		BogRate = 0.18,
+		BogRate = 0.10,
 	},
 	Sand = {
 		Grip = 0.68,

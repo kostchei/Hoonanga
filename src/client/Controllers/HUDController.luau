@@ -218,9 +218,10 @@ function HUDController.Start()
 		local loaded = WeaponState.GetLoaded(vehicle, weaponConfig)
 		local pool = WeaponState.GetPool(vehicle, weaponConfig.AmmoPool)
 
+		local kmh = speed * 1.234
 		status.Text = string.format(
-			" SPEED  %03d\n FUEL   %03d%%\n HULL   %03d%%\n KILLS  %02d\n %s  |  %.2f km",
-			math.floor(speed + 0.5),
+			" SPEED  %03d KM/H\n FUEL   %03d%%\n HULL   %03d%%\n KILLS  %02d\n %s  |  %.2f km",
+			math.floor(kmh + 0.5),
 			math.floor((fuel / maxFuel) * 100 + 0.5),
 			math.floor((hull / maxHull) * 100 + 0.5),
 			kills,

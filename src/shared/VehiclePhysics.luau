@@ -214,11 +214,16 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	local steer = math.clamp(input.Steer, -1, 1)
 
 	if bogRate > 0 and grounded then
-		local lowMovement = math.clamp(1 - math.abs(forwardSpeed) / 18, 0, 1)
-		local effort = 0.2 + math.abs(throttle) * 1.8
-		state.BogLevel += bogRate * effort * (0.35 + lowMovement) * deltaTime
+		if math.abs(throttle) > 0.05 then
+			local lowMovement = math.clamp(1 - math.abs(forwardSpeed) / 18, 0, 1)
+			local effort = math.abs(throttle) * 1.5
+			state.BogLevel += bogRate * effort * (0.2 + lowMovement * 0.8) * deltaTime
+		else
+			-- Releasing throttle allows tires to un-bog from mud
+			state.BogLevel -= 0.35 * deltaTime
+		end
 	else
-		local recovery = if grounded and grip >= 0.8 then 0.3 else 0.12
+		local recovery = if grounded and grip >= 0.8 then 0.4 else 0.2
 		state.BogLevel -= recovery * deltaTime
 	end
 	state.BogLevel = math.clamp(state.BogLevel, 0, 1)
@@ -233,8 +238,9 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 		then math.clamp(speedScaleAttribute, 0.1, 1.15)
 		else 1
 
-	local bogDriveScale = 1 - state.BogLevel * 0.82
-	local surfaceDriveScale = math.clamp(grip, 0.2, 1.05) / math.max(fuelMultiplier, 0.8)
+	local bogDriveScale = 1 - state.BogLevel * 0.62
+	local surfaceDriveScale = math.clamp(math.max(grip, 0.65), 0.2, 1.05)
+		/ math.max(fuelMultiplier, 0.8)
 	local maxForwardSpeed = config.MaxForwardSpeed
 		* speedScale
 		* bogDriveScale

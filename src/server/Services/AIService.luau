@@ -49,7 +49,7 @@ end
 -- How far ahead the AI looks when it has nothing to chase. Long enough to
 -- read a bend and start turning into it, short enough that it does not cut
 -- the corner across the scenery.
-local ROAD_LOOK_AHEAD = 110
+local ROAD_LOOK_AHEAD = 150
 
 local function imperfectSteer(steer: number, now: number): number
 	steer += math.noise(now * STEER_ERROR_RATE) * STEER_ERROR

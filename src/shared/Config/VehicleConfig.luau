@@ -53,9 +53,9 @@ export type VehicleConfig = {
 local configurations: { [string]: VehicleConfig } = {
 	Roadtrain = {
 		DisplayName = "Roadtrain",
-		MaxForwardSpeed = 88,
-		MaxReverseSpeed = 19,
-		Acceleration = 35,
+		MaxForwardSpeed = 135,
+		MaxReverseSpeed = 26,
+		Acceleration = 18,
 		ReverseAcceleration = 18,
 		BrakeDeceleration = 66,
 		CoastDeceleration = 8,
@@ -99,12 +99,17 @@ local configurations: { [string]: VehicleConfig } = {
 			SpringDamping = 18,
 		},
 	},
+	-- Base Ute: Modeled on a stock 1969 Charger-style V8 Ute (440 Magnum V8, 375 hp).
+	-- Scaled to actual vehicle dimensions (15.4 studs length = 5.28m; 1 stud = 0.3428m).
+	-- Physical top speed: 172 studs/s (212 km/h). Acceleration: 26 studs/s^2 (0-100 km/h in 6.3s).
+	-- Single driver, light weapons only. See docs/VEHICLE_UPGRADES_SPEC.md for future
+	-- 426 Hemi V8 and heavy combat load/gear ratio upgrade specifications.
 	Ute = {
 		DisplayName = "Ute",
-		MaxForwardSpeed = 112,
-		MaxReverseSpeed = 28,
-		Acceleration = 52,
-		ReverseAcceleration = 28,
+		MaxForwardSpeed = 172,
+		MaxReverseSpeed = 36,
+		Acceleration = 26,
+		ReverseAcceleration = 18,
 		BrakeDeceleration = 82,
 		CoastDeceleration = 12,
 		MaxSteerAngle = math.rad(38),
@@ -147,9 +152,9 @@ local configurations: { [string]: VehicleConfig } = {
 	},
 	Bike = {
 		DisplayName = "Bike",
-		MaxForwardSpeed = 132,
-		MaxReverseSpeed = 18,
-		Acceleration = 65,
+		MaxForwardSpeed = 205,
+		MaxReverseSpeed = 28,
+		Acceleration = 35,
 		ReverseAcceleration = 20,
 		BrakeDeceleration = 88,
 		CoastDeceleration = 10,
