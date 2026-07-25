@@ -19,6 +19,7 @@ local activeAttachment: Attachment? = nil
 local yaw = 0
 local pitch = 0
 local hiddenParts: { BasePart } = {}
+local isMouseUnlocked = false
 
 local function restoreHiddenParts()
 	for _, part in hiddenParts do
@@ -78,8 +79,13 @@ local function refreshCameraMode()
 	if activeAttachment then
 		hideFirstPersonObstructions(activeAttachment)
 		camera.CameraType = Enum.CameraType.Scriptable
-		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		UserInputService.MouseIconEnabled = false
+		if isMouseUnlocked then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		else
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+			UserInputService.MouseIconEnabled = false
+		end
 	else
 		restoreHiddenParts()
 		camera.CameraType = Enum.CameraType.Custom
@@ -91,8 +97,23 @@ end
 local CameraController = {}
 
 function CameraController.Start()
+	UserInputService.InputBegan:Connect(function(input, _gpe)
+		if
+			input.KeyCode == Enum.KeyCode.LeftAlt
+			or input.KeyCode == Enum.KeyCode.Tab
+			or input.KeyCode == Enum.KeyCode.M
+		then
+			isMouseUnlocked = not isMouseUnlocked
+			refreshCameraMode()
+		end
+	end)
+
 	UserInputService.InputChanged:Connect(function(input)
-		if not activeAttachment or input.UserInputType ~= Enum.UserInputType.MouseMovement then
+		if
+			not activeAttachment
+			or isMouseUnlocked
+			or input.UserInputType ~= Enum.UserInputType.MouseMovement
+		then
 			return
 		end
 
@@ -121,15 +142,17 @@ function CameraController.Start()
 				return
 			end
 
-			-- Use the exact replicated chassis frame for both the cab and camera.
-			-- Smoothing or predicting this transform makes the viewpoint drift
-			-- relative to the visible vehicle whenever it accelerates.
 			camera.CFrame = chassis.CFrame
 				* attachment.CFrame
 				* CFrame.Angles(0, yaw, 0)
 				* CFrame.Angles(pitch, 0, 0)
 		end
 	)
+end
+
+function CameraController.SetMouseUnlocked(unlocked: boolean)
+	isMouseUnlocked = unlocked
+	refreshCameraMode()
 end
 
 return CameraController
