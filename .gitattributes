@@ -5,3 +5,10 @@
 *.json text eol=lf
 *.md text eol=lf
 *.toml text eol=lf
+
+# Shell scripts and sourced env files must stay LF even on Windows checkouts:
+# bash treats a trailing CR as part of the command or the variable value, so
+# CRLF turns a working script into "$'\r': command not found" and would put a
+# stray CR on the end of an API key.
+*.sh text eol=lf
+.env.example text eol=lf

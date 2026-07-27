@@ -98,6 +98,28 @@ scripts/run_studio_test.sh default.project.json scripts/studio_smoke_test.luau s
 | `scripts/milestone6_pickup_art_test.luau` | `m6-pickup-art` | `^\[M6_PICKUP_ART\] PASS:` |
 | `scripts/milestone6_roadtrain_art_test.luau` | `m6-roadtrain-art` | `^\[M6_ROADTRAIN_ART\] PASS:` |
 
+### Publishing
+
+Credentials live in `.env`, which is gitignored. `.env.example` is the tracked
+template. Write the key in without it landing in your shell history — the
+prompt is hidden, so the key is never a command-line argument:
+
+```bash
+read -rsp 'Roblox API key: ' k; echo; read -rp 'Universe ID: ' u; read -rp 'Place ID: ' p; printf 'ROBLOX_API_KEY=%s\nROBLOX_UNIVERSE_ID=%s\nROBLOX_PLACE_ID=%s\n' "$k" "$u" "$p" > .env; unset k; echo "wrote .env"
+```
+
+The key comes from [create.roblox.com/credentials](https://create.roblox.com/credentials)
+and needs the `universe-places:write` scope plus your current IP on its
+allowlist. Then publish:
+
+```bash
+scripts/publish.sh
+```
+
+That builds first as a syntax gate, then uploads through the Open Cloud API.
+There is no staging step: the upload overwrites the live place immediately, so
+point `ROBLOX_PLACE_ID` at a test place if you want a look first.
+
 ### Lobby and match controls
 
 Convoy class, starting primary weapon, and paint preset are selected in the

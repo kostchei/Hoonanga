@@ -38,6 +38,13 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
+# Secrets & Local Environment
+# Open Cloud API keys live here and must never be committed. The example
+# file is the template and is deliberately kept tracked.
+.env
+.env.*
+!.env.example
+
 # Logs & Temporary Files
 *.log
 *.tmp
