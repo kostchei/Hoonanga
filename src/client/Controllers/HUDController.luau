@@ -4,6 +4,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local AudioConfig = require(ReplicatedStorage.Shared.Config.AudioConfig)
+local BuildConfig = require(ReplicatedStorage.Shared.Config.BuildConfig)
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
 local VehicleLocator = require(script.Parent.VehicleLocator)
@@ -50,6 +52,52 @@ end
 
 local function currentVehicle(): Model?
 	return VehicleLocator.ForPlayer(localPlayer)
+end
+
+-- The compass is camera-relative: straight up on the dial is wherever the
+-- driver is looking, so a needle at the top means "it is in front of you".
+-- Positive degrees are clockwise both here and in GuiObject.Rotation, so the
+-- bearing is the needle rotation with no conversion.
+local function bearingDegrees(facing: Vector3, target: Vector3): number?
+	local forward = Vector3.new(facing.X, 0, facing.Z)
+	local toward = Vector3.new(target.X, 0, target.Z)
+	if forward.Magnitude < 1e-4 or toward.Magnitude < 1e-4 then
+		return nil
+	end
+	forward = forward.Unit
+	toward = toward.Unit
+	local right = forward:Cross(Vector3.yAxis)
+	return math.deg(math.atan2(toward:Dot(right), toward:Dot(forward)))
+end
+
+local function findFinishLine(): Model?
+	local world = workspace:FindFirstChild("HoonangaWorld")
+	local gate = if world then world:FindFirstChild("FinishLine") else nil
+	return if gate and gate:IsA("Model") then gate else nil
+end
+
+-- One needle: a bar riding the rim of the dial, held in a full-size
+-- transparent frame so setting Rotation swings it around the dial's centre
+-- rather than spinning the bar on the spot.
+local function makeNeedle(compass: Frame, name: string, color: Color3): Frame
+	local pivot = Instance.new("Frame")
+	pivot.Name = name
+	pivot.AnchorPoint = Vector2.new(0.5, 0.5)
+	pivot.Position = UDim2.fromScale(0.5, 0.5)
+	pivot.Size = UDim2.fromScale(1, 1)
+	pivot.BackgroundTransparency = 1
+	pivot.Parent = compass
+
+	local bar = Instance.new("Frame")
+	bar.Name = "Bar"
+	bar.AnchorPoint = Vector2.new(0.5, 0)
+	bar.Position = UDim2.new(0.5, 0, 0, 7)
+	bar.Size = UDim2.fromOffset(7, 26)
+	bar.BackgroundColor3 = color
+	bar.BorderSizePixel = 0
+	bar.Parent = pivot
+
+	return pivot
 end
 
 local function memberStatus(vehicle: Model): string
@@ -130,7 +178,8 @@ function HUDController.Start()
 	versionTag.TextColor3 = Color3.fromRGB(255, 103, 65)
 	versionTag.TextSize = 13
 	versionTag.TextXAlignment = Enum.TextXAlignment.Center
-	versionTag.Text = "Hoonanga v1.6.0 [M6]"
+	versionTag.Text =
+		string.format("Hoonanga v%s [M%d]", BuildConfig.Version, BuildConfig.Milestone)
 	versionTag.Parent = gui
 
 	local crosshair = Instance.new("Frame")
@@ -193,6 +242,100 @@ function HUDController.Start()
 	local lastTransferSerial = localPlayer:GetAttribute("ControlTransferSerial") or 0
 	local transferMessageUntil = 0
 
+	-- Wayfinder. Two needles on one camera-relative dial: where the road goes
+	-- next, and - once the run has become a race - where the finish is. On a
+	-- road that bends through canyons neither is guessable from the horizon.
+	local compass = Instance.new("Frame")
+	compass.Name = "Compass"
+	compass.AnchorPoint = Vector2.new(0.5, 1)
+	compass.Position = UDim2.new(0.5, 0, 1, -38)
+	compass.Size = UDim2.fromOffset(132, 132)
+	compass.BackgroundColor3 = Color3.fromRGB(15, 18, 19)
+	compass.BackgroundTransparency = 0.28
+	compass.BorderSizePixel = 0
+	compass.Parent = gui
+
+	local compassCorner = Instance.new("UICorner")
+	compassCorner.CornerRadius = UDim.new(0.5, 0)
+	compassCorner.Parent = compass
+
+	local hub = Instance.new("Frame")
+	hub.Name = "Hub"
+	hub.AnchorPoint = Vector2.new(0.5, 0.5)
+	hub.Position = UDim2.fromScale(0.5, 0.5)
+	hub.Size = UDim2.fromOffset(8, 8)
+	hub.BackgroundColor3 = Color3.fromRGB(238, 220, 189)
+	hub.BorderSizePixel = 0
+	hub.Parent = compass
+
+	local roadNeedle = makeNeedle(compass, "RoadNeedle", CROSSHAIR_READY)
+	local finishNeedle = makeNeedle(compass, "FinishNeedle", Color3.fromRGB(245, 245, 240))
+	finishNeedle.Visible = false
+
+	local compassCaption = makeLabel(
+		gui,
+		"CompassCaption",
+		UDim2.new(0.5, -80, 1, -30),
+		UDim2.fromOffset(160, 22),
+		13,
+		Enum.TextXAlignment.Center
+	)
+	compassCaption.Text = "ROAD AHEAD"
+
+	-- Green flag: the run has stopped being open-ended and is now a race.
+	local flagBanner = Instance.new("Frame")
+	flagBanner.Name = "FinalStretch"
+	flagBanner.AnchorPoint = Vector2.new(0.5, 0)
+	flagBanner.Position = UDim2.new(0.5, 0, 0, 92)
+	flagBanner.Size = UDim2.fromOffset(560, 60)
+	flagBanner.BackgroundColor3 = Color3.fromRGB(15, 18, 19)
+	flagBanner.BackgroundTransparency = 0.2
+	flagBanner.BorderSizePixel = 0
+	flagBanner.Visible = false
+	flagBanner.Parent = gui
+
+	local flagPole = Instance.new("Frame")
+	flagPole.Name = "FlagPole"
+	flagPole.Position = UDim2.fromOffset(22, 10)
+	flagPole.Size = UDim2.fromOffset(4, 40)
+	flagPole.BackgroundColor3 = Color3.fromRGB(216, 210, 198)
+	flagPole.BorderSizePixel = 0
+	flagPole.Parent = flagBanner
+
+	local flagCloth = Instance.new("Frame")
+	flagCloth.Name = "FlagCloth"
+	flagCloth.Position = UDim2.fromOffset(26, 10)
+	flagCloth.Size = UDim2.fromOffset(46, 28)
+	flagCloth.BackgroundColor3 = Color3.fromRGB(46, 196, 92)
+	flagCloth.BorderSizePixel = 0
+	flagCloth.Parent = flagBanner
+
+	local flagText = Instance.new("TextLabel")
+	flagText.Name = "FlagText"
+	flagText.BackgroundTransparency = 1
+	flagText.Position = UDim2.fromOffset(88, 0)
+	flagText.Size = UDim2.new(1, -108, 1, 0)
+	flagText.Font = Enum.Font.GothamBold
+	flagText.TextColor3 = Color3.fromRGB(46, 196, 92)
+	flagText.TextSize = 24
+	flagText.TextXAlignment = Enum.TextXAlignment.Left
+	flagText.Text = "YOU'RE IN THE FINAL STRETCH, RACE FOR THE FINISH!"
+	flagText.TextScaled = false
+	flagText.Parent = flagBanner
+
+	local flagBannerUntil = 0
+	local finishPathDistance: number? = nil
+
+	local remotes = ReplicatedStorage:WaitForChild("HoonangaRemotes")
+	local finalStretchRemote = remotes:WaitForChild("FinalStretchStarted") :: RemoteEvent
+	finalStretchRemote.OnClientEvent:Connect(function(payload)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		finishPathDistance = payload.FinishDistance
+		flagBannerUntil = os.clock() + payload.BannerSeconds
+	end)
+
 	RunService.RenderStepped:Connect(function()
 		local vehicle = currentVehicle()
 		local visible = vehicle ~= nil
@@ -201,6 +344,11 @@ function HUDController.Start()
 		ammo.Visible = visible
 		weapon.Visible = visible
 		crosshair.Visible = visible
+		compass.Visible = visible
+		compassCaption.Visible = visible
+		-- The call-out is on its own timer rather than tied to the vehicle:
+		-- being told the race is on matters just as much while spectating.
+		flagBanner.Visible = os.clock() < flagBannerUntil
 		if not vehicle or not vehicle.PrimaryPart then
 			warning.Visible = os.clock() < transferMessageUntil
 			return
@@ -260,6 +408,39 @@ function HUDController.Start()
 				pool
 			)
 
+		local camera = workspace.CurrentCamera
+		local facing = if camera
+			then camera.CFrame.LookVector
+			else vehicle.PrimaryPart.CFrame.LookVector
+		-- RoadForward is published by RoadService against the road's own
+		-- spine, so it keeps pointing down the road through a bend rather
+		-- than wherever the car is currently slewed.
+		local roadForward = vehicle:GetAttribute("RoadForward")
+		local roadBearing = if typeof(roadForward) == "Vector3"
+			then bearingDegrees(facing, roadForward :: Vector3)
+			else nil
+		roadNeedle.Visible = roadBearing ~= nil
+		roadNeedle.Rotation = roadBearing or 0
+
+		local finishGate = findFinishLine()
+		local finishBearing = if finishGate
+			then bearingDegrees(
+				facing,
+				finishGate:GetPivot().Position - vehicle.PrimaryPart.Position
+			)
+			else nil
+		finishNeedle.Visible = finishBearing ~= nil
+		finishNeedle.Rotation = finishBearing or 0
+
+		if finishPathDistance then
+			compassCaption.Text =
+				string.format("FINISH  %.2f km", math.max(0, finishPathDistance - distance) / 1000)
+			compassCaption.TextColor3 = Color3.fromRGB(245, 245, 240)
+		else
+			compassCaption.Text = "ROAD AHEAD"
+			compassCaption.TextColor3 = Color3.fromRGB(238, 220, 189)
+		end
+
 		if vehicle:GetAttribute("MuzzleBlocked") == true then
 			crosshair.BackgroundColor3 = CROSSHAIR_BLOCKED
 		elseif vehicle:GetAttribute("AimOutOfTraverse") == true then
@@ -286,6 +467,12 @@ function HUDController.Start()
 		elseif vehicle:GetAttribute("OutOfFuel") == true then
 			warning.Visible = true
 			warning.Text = "OUT OF FUEL"
+		elseif maxFuel > 0 and fuel / maxFuel <= AudioConfig.LowFuelRatio then
+			warning.Visible = true
+			warning.Text = "LOW FUEL"
+		elseif vehicle:GetAttribute("Bogged") == true then
+			warning.Visible = true
+			warning.Text = "BOGGED - KEEP POWER ON"
 		else
 			warning.Visible = false
 		end

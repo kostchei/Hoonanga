@@ -368,6 +368,32 @@ function WeaponService.Reload(vehicle: Model)
 	end)
 end
 
+-- Driving over a crate loads the magazines that feed from that pool as well
+-- as filling the reserve. Without this the reserve went up but the number the
+-- HUD leads with - rounds actually loaded - sat pinned at the magazine size
+-- until you pressed reload, which reads as "ammo pickups stop working".
+-- It is the crate being loaded on rather than a free reload: a weapon already
+-- part-way through a reload is left alone.
+local function topUpMagazines(vehicle: Model, pool: string)
+	for _, config in WeaponConfig.Weapons do
+		if
+			config.MagazineSize <= 0
+			or config.AmmoPool ~= pool
+			or WeaponState.IsReloading(vehicle, config)
+		then
+			continue
+		end
+		local attribute = WeaponState.MagazineAttribute(config.Id)
+		local magazine = requireNumber(vehicle, attribute)
+		local available = WeaponState.GetPool(vehicle, pool)
+		local loaded = math.min(config.MagazineSize - magazine, available)
+		if loaded > 0 then
+			vehicle:SetAttribute(attribute, magazine + loaded)
+			WeaponState.SetPool(vehicle, pool, available - loaded)
+		end
+	end
+end
+
 -- Used by ammunition pickups (GDD 12.2). Returns how much was actually taken
 -- on, so a pickup can refuse to be consumed by a full vehicle.
 function WeaponService.AddAmmo(vehicle: Model, pool: string, amount: number): number
@@ -376,12 +402,18 @@ function WeaponService.AddAmmo(vehicle: Model, pool: string, amount: number): nu
 		error(string.format("Unknown ammo pool %q", pool), 2)
 	end
 
+	-- Magazines first: a vehicle sitting on a full reserve with an empty
+	-- magazine has somewhere to put the crate, and refusing it there was the
+	-- other half of ammunition appearing to cap out.
+	topUpMagazines(vehicle, pool)
+
 	local current = WeaponState.GetPool(vehicle, pool)
 	local added = math.min(amount, poolConfig.Max - current)
 	if added <= 0 then
 		return 0
 	end
 	WeaponState.SetPool(vehicle, pool, current + added)
+	topUpMagazines(vehicle, pool)
 	return added
 end
 
@@ -392,14 +424,22 @@ function WeaponService.Start()
 		end
 
 		local vehicle = VehicleService.GetPlayerVehicle(player)
-		if vehicle and VehicleService.IsPlayerDriving(player, vehicle) then
+		if
+			vehicle
+			and vehicle:GetAttribute("MatchInputEnabled") == true
+			and VehicleService.IsPlayerDriving(player, vehicle)
+		then
 			WeaponService.TryFire(vehicle, direction)
 		end
 	end)
 
 	RemoteService.Get("ReloadWeapon").OnServerEvent:Connect(function(player)
 		local vehicle = VehicleService.GetPlayerVehicle(player)
-		if vehicle and VehicleService.IsPlayerDriving(player, vehicle) then
+		if
+			vehicle
+			and vehicle:GetAttribute("MatchInputEnabled") == true
+			and VehicleService.IsPlayerDriving(player, vehicle)
+		then
 			WeaponService.Reload(vehicle)
 		end
 	end)
@@ -410,7 +450,11 @@ function WeaponService.Start()
 		end
 
 		local vehicle = VehicleService.GetPlayerVehicle(player)
-		if vehicle and VehicleService.IsPlayerDriving(player, vehicle) then
+		if
+			vehicle
+			and vehicle:GetAttribute("MatchInputEnabled") == true
+			and VehicleService.IsPlayerDriving(player, vehicle)
+		then
 			WeaponService.SelectWeapon(vehicle, weaponId)
 		end
 	end)

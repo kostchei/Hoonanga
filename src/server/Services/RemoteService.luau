@@ -15,10 +15,15 @@ local REMOTE_EVENT_NAMES = {
 	"ClaimUpgrade",
 	"RequestSpectateTarget",
 	"SessionStateChanged",
+	"LobbyStatusUpdated",
 	"ProgressionUpdated",
 	"ActiveUpgradesUpdated",
+	"UpgradeOffered",
+	"UpdateAccessibilitySettings",
+	"CompleteTutorial",
 	"LeaderboardUpdated",
 	"PlayAudioEffect",
+	"FinalStretchStarted",
 }
 
 local REMOTE_FUNCTION_NAMES = {

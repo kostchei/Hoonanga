@@ -6,9 +6,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local EnvironmentConfig = require(ReplicatedStorage.Shared.Config.EnvironmentConfig)
+local RoadContentConfig = require(ReplicatedStorage.Shared.Config.RoadContentConfig)
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 local ConvoyService = require(script.Parent.ConvoyService)
+local PickupArtBuilder = require(script.Parent.PickupArtBuilder)
 
 -- Frames are world-space CFrames sampled along the chunk's centre line, with
 -- Distances holding the arc length of each one from the very start of the
@@ -258,6 +260,7 @@ local chunks: { ChunkRecord } = {}
 local chunkFolder: Folder
 local nextChunkIndex = 0
 local running = false
+local generationSerial = 0
 local currentFamily = "BoulderPlain"
 local remainingInFamily = 0
 local chunksUntilFork = 0
@@ -274,6 +277,13 @@ local runPitch = 0
 local runRoll = 0
 -- Which way the last curve went, so the next one can lean the other way.
 local lastCurveSign = 1
+
+-- The finish line, once a session has asked for one. Held as an arc distance
+-- because that is the only stable way to name a point on a road that bends:
+-- the geometry there usually does not exist yet when the session decides
+-- where the finish is, so the gate is built lazily once the road reaches it.
+local finishDistance: number? = nil
+local finishModel: Model? = nil
 
 -- Curvature of the chunk currently being built, in radians per stud. Module
 -- state rather than a parameter threaded through every builder: every
@@ -447,42 +457,6 @@ end
 
 local FUEL_PICKUP_AMOUNT = 90
 
--- Pickups have to be told apart at a glance from a moving vehicle, so each
--- type gets its own colour and silhouette rather than a label nobody can read
--- at 90 studs a second (GDD 15.3).
-local PICKUP_STYLES: { [string]: { Color: Color3, Shape: Enum.PartType, Size: Vector3 } } = {
-	Fuel = {
-		Color = Color3.fromRGB(191, 59, 41),
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(3.2, 4, 3.2),
-	},
-	Bullets = {
-		Color = Color3.fromRGB(198, 164, 66),
-		Shape = Enum.PartType.Block,
-		Size = Vector3.new(4, 2.6, 3),
-	},
-	Rockets = {
-		Color = Color3.fromRGB(96, 108, 150),
-		Shape = Enum.PartType.Block,
-		Size = Vector3.new(3, 3, 5.4),
-	},
-	FlameFuel = {
-		Color = Color3.fromRGB(214, 118, 38),
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(3, 3.4, 3),
-	},
-	Throwables = {
-		Color = Color3.fromRGB(150, 176, 92),
-		Shape = Enum.PartType.Block,
-		Size = Vector3.new(3.2, 2.8, 3.2),
-	},
-	Repair = {
-		Color = Color3.fromRGB(228, 228, 222),
-		Shape = Enum.PartType.Block,
-		Size = Vector3.new(4, 3, 4),
-	},
-}
-
 local function pickupAmount(pickupType: string): number
 	if pickupType == "Fuel" then
 		return FUEL_PICKUP_AMOUNT
@@ -498,26 +472,7 @@ local function pickupAmount(pickupType: string): number
 end
 
 local function addPickup(chunk: Model, cframe: CFrame, pickupType: string)
-	local style = PICKUP_STYLES[pickupType]
-	if not style then
-		error(string.format("No pickup style defined for %q", pickupType))
-	end
-
-	local pickup = Instance.new("Part")
-	pickup.Name = pickupType .. "Pickup"
-	pickup.Anchored = true
-	pickup.CanCollide = false
-	pickup.Size = style.Size
-	pickup.Shape = style.Shape
-	pickup.CFrame = if style.Shape == Enum.PartType.Cylinder
-		then cframe * CFrame.Angles(0, 0, math.rad(90))
-		else cframe
-	pickup.Color = style.Color
-	pickup.Material = Enum.Material.Metal
-	pickup:SetAttribute("PickupType", pickupType)
-	pickup:SetAttribute("PickupAmount", pickupAmount(pickupType))
-	pickup.Parent = chunk
-	CollectionService:AddTag(pickup, "HoonangaPickup")
+	PickupArtBuilder.Create(chunk, cframe, pickupType, pickupAmount(pickupType))
 end
 
 -- Ammunition types rotate rather than being rolled, so a run's supply line is
@@ -633,7 +588,12 @@ local function addGroundRoad(
 		if isAsphalt then Enum.Material.Asphalt else Enum.Material.Ground
 	)
 
-	if index % 3 == 1 then
+	local hazardIntensity = chunk:GetAttribute("HazardIntensity")
+	local resolvedHazardIntensity = if typeof(hazardIntensity) == "number"
+		then hazardIntensity
+		else 0
+
+	if index % 3 == 1 or resolvedHazardIntensity >= 2 then
 		local mud = makeSurface(
 			chunk,
 			"MudPatch",
@@ -646,7 +606,7 @@ local function addGroundRoad(
 		mud:SetAttribute("HazardType", "Mud")
 	end
 
-	if index % 5 == 2 then
+	if index % 5 == 2 or resolvedHazardIntensity >= 3 then
 		local oil = makeSurface(
 			chunk,
 			"OilSlick",
@@ -767,6 +727,22 @@ local function configureCanyonChunk(chunk: Model, index: number)
 	-- narrow corridor.
 	local pinchSide = if index % 2 == 0 then -1 else 1
 	addBoulder(chunk, pinchSide * (CANYON_WIDTH / 2 - 6), 1.8, 0, 0.85)
+	local hazardIntensity = chunk:GetAttribute("HazardIntensity")
+	if typeof(hazardIntensity) == "number" and hazardIntensity >= 2 then
+		addBoulder(chunk, -pinchSide * (CANYON_WIDTH / 2 - 9), 1.8, 145, 0.75)
+	end
+	if typeof(hazardIntensity) == "number" and hazardIntensity >= 3 then
+		local oil = makeSurface(
+			chunk,
+			"CanyonOilSlick",
+			Vector3.new(14, 0.08, 32),
+			spine(0, 0.15, -105),
+			"Oil",
+			ROAD_COLORS.Oil,
+			Enum.Material.SmoothPlastic
+		)
+		oil:SetAttribute("HazardType", "Oil")
+	end
 
 	addChunkPickups(chunk, index, 0, CANYON_WIDTH / 2, 0)
 
@@ -799,17 +775,33 @@ local function configureHighwayChunk(chunk: Model, index: number)
 		deck:SetAttribute("HorizonGround", false)
 	end
 
-	local railedSide = if index % 2 == 0 then -1 else 1
-	makeBarrier(
-		chunk,
-		"HighwayGuardRail",
-		1.6,
-		HIGHWAY_RAIL_HEIGHT,
-		railedSide * (HIGHWAY_WIDTH / 2 - 0.8),
-		HIGHWAY_RISE + HIGHWAY_RAIL_HEIGHT / 2 + 0.7,
-		Color3.fromRGB(150, 150, 145),
-		Enum.Material.Metal
-	)
+	local hazardIntensity = chunk:GetAttribute("HazardIntensity")
+	if typeof(hazardIntensity) ~= "number" or hazardIntensity < 2 then
+		local railedSide = if index % 2 == 0 then -1 else 1
+		makeBarrier(
+			chunk,
+			"HighwayGuardRail",
+			1.6,
+			HIGHWAY_RAIL_HEIGHT,
+			railedSide * (HIGHWAY_WIDTH / 2 - 0.8),
+			HIGHWAY_RISE + HIGHWAY_RAIL_HEIGHT / 2 + 0.7,
+			Color3.fromRGB(150, 150, 145),
+			Enum.Material.Metal
+		)
+	end
+	if typeof(hazardIntensity) == "number" and hazardIntensity >= 3 then
+		local oil = makeSurface(
+			chunk,
+			"HighwayOilSlick",
+			Vector3.new(18, 0.08, 42),
+			spine(10, HIGHWAY_RISE + 0.75, 25),
+			"Oil",
+			ROAD_COLORS.Oil,
+			Enum.Material.SmoothPlastic
+		)
+		oil:SetAttribute("HorizonGround", false)
+		oil:SetAttribute("HazardType", "Oil")
+	end
 
 	addChunkPickups(chunk, index, 0, HIGHWAY_WIDTH / 2, HIGHWAY_RISE)
 
@@ -850,7 +842,9 @@ end
 -- point. Weighted low so crossing one is an occasional event rather than
 -- the default texture of a run.
 local function configureMudflatChunk(chunk: Model, index: number)
-	local pathOffset = if index % 2 == 0 then -16 else 16
+	local hazardIntensity = chunk:GetAttribute("HazardIntensity")
+	local isHazard = typeof(hazardIntensity) == "number" and hazardIntensity >= 2
+	local pathOffset = (if index % 2 == 0 then -1 else 1) * (if isHazard then 24 else 16)
 
 	makeStrip(
 		chunk,
@@ -868,7 +862,7 @@ local function configureMudflatChunk(chunk: Model, index: number)
 	makeStrip(
 		chunk,
 		"FirmPath",
-		ROAD_SURFACE_WIDTH,
+		if isHazard then 30 else ROAD_SURFACE_WIDTH,
 		0.22,
 		pathOffset,
 		0.05,
@@ -878,6 +872,18 @@ local function configureMudflatChunk(chunk: Model, index: number)
 	)
 
 	addChunkPickups(chunk, index, pathOffset, ROAD_SURFACE_WIDTH / 2, 0)
+	if typeof(hazardIntensity) == "number" and hazardIntensity >= 3 then
+		local oil = makeSurface(
+			chunk,
+			"FirmPathOil",
+			Vector3.new(13, 0.08, 30),
+			spine(pathOffset, 0.2, 90),
+			"Oil",
+			ROAD_COLORS.Oil,
+			Enum.Material.SmoothPlastic
+		)
+		oil:SetAttribute("HazardType", "Oil")
+	end
 
 	chunk:SetAttribute("PreferredLaneX", pathOffset)
 end
@@ -887,10 +893,11 @@ end
 -- highway with fuel versus protected canyon without fuel").
 local function configureForkChunk(chunk: Model, index: number)
 	local laneOffset = FORK_LANE_WIDTH / 2 + 10
+	local forkSet = chunk:GetAttribute("ForkSet")
+	if typeof(forkSet) ~= "string" then
+		forkSet = "FuelMud"
+	end
 
-	-- Solid ground under the whole chunk. The lanes and the boulder divider
-	-- sit on top of it: the divider should make you commit to a side, not
-	-- open a pit down the centre line you were already driving along.
 	addBaseTerrain(
 		chunk,
 		index,
@@ -900,6 +907,42 @@ local function configureForkChunk(chunk: Model, index: number)
 		Enum.Material.Slate
 	)
 
+	local leftProfile = "Mud"
+	local leftColor = ROAD_COLORS.Mud
+	local leftMaterial = Enum.Material.Mud
+	local rightProfile = "LooseStone"
+	local rightColor = ROAD_COLORS.LooseStone
+	local rightMaterial = Enum.Material.Slate
+	local leftPickup = "Fuel"
+	local rightPickup: string? = nil
+
+	if forkSet == "AmmoRock" then
+		leftProfile = "LooseStone"
+		leftColor = ROAD_COLORS.LooseStone
+		leftMaterial = Enum.Material.Slate
+		rightProfile = "Asphalt"
+		rightColor = ROAD_COLORS.Asphalt
+		rightMaterial = Enum.Material.Asphalt
+		leftPickup = "Bullets"
+	elseif forkSet == "RepairOil" then
+		leftProfile = "Oil"
+		leftColor = ROAD_COLORS.Oil
+		leftMaterial = Enum.Material.SmoothPlastic
+		rightProfile = "WornDirt"
+		rightColor = ROAD_COLORS.WornDirt
+		rightMaterial = Enum.Material.Ground
+		leftPickup = "Repair"
+	elseif forkSet == "SplitSupplies" then
+		leftProfile = "Sand"
+		leftColor = ROAD_COLORS.Sand
+		leftMaterial = Enum.Material.Sand
+		rightProfile = "Asphalt"
+		rightColor = ROAD_COLORS.Asphalt
+		rightMaterial = Enum.Material.Asphalt
+		leftPickup = "Fuel"
+		rightPickup = "Bullets"
+	end
+
 	local leftLane = makeStrip(
 		chunk,
 		"ForkLaneLeft",
@@ -907,16 +950,16 @@ local function configureForkChunk(chunk: Model, index: number)
 		0.9,
 		-laneOffset,
 		-0.4,
-		"Mud",
-		ROAD_COLORS.Mud,
-		Enum.Material.Mud
+		leftProfile,
+		leftColor,
+		leftMaterial
 	)
-	for _, lane in leftLane do
-		lane:SetAttribute("HazardType", "Mud")
+	if leftProfile == "Mud" or leftProfile == "Oil" then
+		for _, lane in leftLane do
+			lane:SetAttribute("HazardType", leftProfile)
+		end
 	end
-	-- The fork's fuel is unconditional and sits in the mud lane: it is the
-	-- tradeoff the whole chunk exists for, not part of the ordinary cadence.
-	addPickup(chunk, spine(-laneOffset, 2.25, 0), "Fuel")
+	addPickup(chunk, spine(-laneOffset, 2.25, 0), leftPickup)
 
 	makeStrip(
 		chunk,
@@ -925,10 +968,13 @@ local function configureForkChunk(chunk: Model, index: number)
 		1,
 		laneOffset,
 		-0.55,
-		"LooseStone",
-		ROAD_COLORS.LooseStone,
-		Enum.Material.Slate
+		rightProfile,
+		rightColor,
+		rightMaterial
 	)
+	if rightPickup then
+		addPickup(chunk, spine(laneOffset, 2.25, -70), rightPickup)
+	end
 
 	for offsetZ = -1, 1 do
 		addBoulder(chunk, 0, 2, offsetZ * 150, 0.9)
@@ -939,6 +985,43 @@ local function configureForkChunk(chunk: Model, index: number)
 	-- Steer AI toward the predictable right lane rather than the boulder
 	-- divider it would otherwise drive straight at.
 	chunk:SetAttribute("PreferredLaneX", laneOffset)
+end
+
+local function applyContentVariant(
+	chunk: Model,
+	familyName: string,
+	index: number,
+	isFirstOfRun: boolean,
+	isLastOfRun: boolean
+)
+	if familyName == "Fork" then
+		local forkSets = RoadContentConfig.ForkSets
+		chunk:SetAttribute("ForkSet", forkSets[(index % #forkSets) + 1])
+		chunk:SetAttribute("ChunkVariant", "Fork")
+		chunk:SetAttribute("VariantKind", "Fork")
+		chunk:SetAttribute("HazardIntensity", 1)
+		return
+	end
+
+	local variants = RoadContentConfig.Families[familyName]
+	if not variants then
+		return
+	end
+	local variantIndex: number
+	if isFirstOfRun then
+		variantIndex = 7
+	elseif isLastOfRun then
+		variantIndex = 8
+	elseif index % 5 == 2 then
+		variantIndex = 5 + (index % 2)
+	else
+		variantIndex = (index % 4) + 1
+	end
+	local variant = variants[variantIndex]
+	chunk:SetAttribute("ChunkVariant", variant.Id)
+	chunk:SetAttribute("VariantKind", variant.Kind)
+	chunk:SetAttribute("ArtSet", variant.ArtSet)
+	chunk:SetAttribute("HazardIntensity", variant.HazardIntensity)
 end
 
 -- Decides this chunk's curve. Returns the total turn in radians.
@@ -1104,6 +1187,7 @@ local function configureChunk(chunk: Model, index: number): ChunkRecord
 	local family, isFirstOfRun, isLastOfRun = decideChunk()
 	local biome = EnvironmentConfig.Biomes[family] or EnvironmentConfig.Biomes.BoulderPlain
 	chunk:SetAttribute("EnvironmentBiome", biome.Name)
+	applyContentVariant(chunk, family, index, isFirstOfRun, isLastOfRun)
 	-- Spawn positions are authored in world space inside chunk zero. Keeping
 	-- the opening chunk straight guarantees those positions remain on the
 	-- road and prevents the first input a player makes from being a ninety.
@@ -1314,13 +1398,14 @@ function RoadService.GetLaneTarget(position: Vector3, lookAhead: number): Vector
 	return (last.ExitCFrame * CFrame.new(last.LaneX, 0, -lookAhead)).Position
 end
 
--- Resolves an absolute path distance and lateral formation offset. Formation
--- followers use this instead of chasing a world-space point behind the
--- leader, so they take the same curved spine and chosen fork.
-function RoadService.GetPathTarget(distance: number, lateral: number): Vector3?
+-- The full frame - position *and* heading - of the drivable line at an
+-- absolute arc distance. Nil means that distance is not on road that has
+-- actually been generated yet, which is what lets the finish gate wait for
+-- the road to reach it instead of being built out in empty space.
+local function laneFrameAtDistance(distance: number): CFrame?
 	local first = chunks[1]
 	if first and distance <= first.Distances[1] then
-		return (first.Frames[1] * CFrame.new(first.LaneX + lateral, 0, 0)).Position
+		return first.Frames[1] * CFrame.new(first.LaneX, 0, 0)
 	end
 	for _, record in chunks do
 		local distances = record.Distances
@@ -1332,9 +1417,20 @@ function RoadService.GetPathTarget(distance: number, lateral: number): Vector3?
 				local span = distances[sample + 1] - distances[sample]
 				local alpha = if span > 0 then (distance - distances[sample]) / span else 0
 				local frame = record.Frames[sample]:Lerp(record.Frames[sample + 1], alpha)
-				return (frame * CFrame.new(record.LaneX + lateral, 0, 0)).Position
+				return frame * CFrame.new(record.LaneX, 0, 0)
 			end
 		end
+	end
+	return nil
+end
+
+-- Resolves an absolute path distance and lateral formation offset. Formation
+-- followers use this instead of chasing a world-space point behind the
+-- leader, so they take the same curved spine and chosen fork.
+function RoadService.GetPathTarget(distance: number, lateral: number): Vector3?
+	local frame = laneFrameAtDistance(distance)
+	if frame then
+		return (frame * CFrame.new(lateral, 0, 0)).Position
 	end
 	local last = chunks[#chunks]
 	if not last then
@@ -1344,9 +1440,141 @@ function RoadService.GetPathTarget(distance: number, lateral: number): Vector3?
 	return (last.ExitCFrame * CFrame.new(last.LaneX + lateral, 0, -beyond)).Position
 end
 
+-- Which way "along the road" points in world space at a given arc distance,
+-- flattened to the horizontal plane. The HUD compass needs this: on a road
+-- that bends, "forward" is not the world axis and is not the way the car
+-- happens to be pointing either.
+function RoadService.GetPathForward(distance: number): Vector3?
+	local last = chunks[#chunks]
+	local frame = laneFrameAtDistance(distance) or (if last then last.ExitCFrame else nil)
+	if not frame then
+		return nil
+	end
+	local look = frame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 1e-4 then
+		return nil
+	end
+	return flat.Unit
+end
+
 function RoadService.GetChunkAt(position: Vector3): Model?
 	local location = RoadService.LocateOnPath(position)
 	return if location then location.Record.Model else nil
+end
+
+-- The finish gate straddles the drivable line rather than the full chunk
+-- width: it has to read as a gate you drive through, and the runoff either
+-- side is scenery, not track.
+local FINISH_HALF_WIDTH = 30
+local FINISH_POST_HEIGHT = 26
+local FINISH_POLE_HEIGHT = 12
+local FINISH_CHECKER_COLUMNS = 6
+local FINISH_CHECKER_ROWS = 4
+local FINISH_CHECKER_CELL = 2.4
+local FINISH_CHECKER_DARK = Color3.fromRGB(22, 22, 24)
+local FINISH_CHECKER_LIGHT = Color3.fromRGB(240, 238, 232)
+
+local function makeFinishPart(
+	gate: Model,
+	name: string,
+	size: Vector3,
+	cframe: CFrame,
+	color: Color3
+): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	-- Nothing about the gate is allowed to wreck the car that is winning, so
+	-- the whole structure is decoration the physics engine cannot see.
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Size = size
+	part.CFrame = cframe
+	part.Color = color
+	part.Material = Enum.Material.SmoothPlastic
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = gate
+	return part
+end
+
+-- A checkered flag flown from the top of one gate post. Built out of a grid
+-- of squares rather than a texture so the checker exists without shipping an
+-- image asset, and flown outward from the post so it reads against the sky
+-- instead of hanging over the racing line.
+local function addCheckeredFlag(gate: Model, frame: CFrame, postX: number, outward: number)
+	makeFinishPart(
+		gate,
+		"FlagPole",
+		Vector3.new(0.8, FINISH_POLE_HEIGHT, 0.8),
+		frame * CFrame.new(postX, FINISH_POST_HEIGHT + FINISH_POLE_HEIGHT / 2, 0),
+		Color3.fromRGB(180, 180, 176)
+	)
+
+	local flagTop = FINISH_POST_HEIGHT + FINISH_POLE_HEIGHT
+	for column = 0, FINISH_CHECKER_COLUMNS - 1 do
+		for row = 0, FINISH_CHECKER_ROWS - 1 do
+			makeFinishPart(
+				gate,
+				string.format("Check_%d_%d", column, row),
+				Vector3.new(FINISH_CHECKER_CELL, FINISH_CHECKER_CELL, 0.4),
+				frame
+					* CFrame.new(
+						postX + outward * (0.6 + FINISH_CHECKER_CELL * (column + 0.5)),
+						flagTop - FINISH_CHECKER_CELL * (row + 0.5),
+						0
+					),
+				if (column + row) % 2 == 0 then FINISH_CHECKER_DARK else FINISH_CHECKER_LIGHT
+			)
+		end
+	end
+end
+
+-- Parented to the world folder rather than to a chunk, so chunk recycling
+-- cannot delete the finish out from under the leader on the way to it.
+local function buildFinishLine()
+	if finishModel or not finishDistance then
+		return
+	end
+	local frame = laneFrameAtDistance(finishDistance)
+	if not frame then
+		-- The road has not been generated this far yet. The recycle loop
+		-- calls back every pass until it has.
+		return
+	end
+	local world = chunkFolder.Parent
+	if not world then
+		error("road chunk folder has no world parent to hold the finish line")
+	end
+
+	local gate = Instance.new("Model")
+	gate.Name = "FinishLine"
+	gate:SetAttribute("PathDistance", finishDistance)
+
+	for _, side in { -1, 1 } do
+		makeFinishPart(
+			gate,
+			"Post",
+			Vector3.new(2.4, FINISH_POST_HEIGHT, 2.4),
+			frame * CFrame.new(side * FINISH_HALF_WIDTH, FINISH_POST_HEIGHT / 2, 0),
+			Color3.fromRGB(64, 62, 60)
+		)
+		addCheckeredFlag(gate, frame, side * FINISH_HALF_WIDTH, side)
+	end
+
+	-- The crossbar is the thing the HUD compass and the driver both aim at,
+	-- so it is the model's primary part.
+	gate.PrimaryPart = makeFinishPart(
+		gate,
+		"Banner",
+		Vector3.new(FINISH_HALF_WIDTH * 2, 5, 1.2),
+		frame * CFrame.new(0, FINISH_POST_HEIGHT - 2.5, 0),
+		Color3.fromRGB(22, 22, 24)
+	)
+	gate.Parent = world
+	finishModel = gate
 end
 
 -- Counts vehicles physically standing inside each chunk, keyed by chunk
@@ -1392,6 +1620,12 @@ local function countOccupancy(): ({ [number]: number }, number?)
 			slowestPlayer = if slowestPlayer
 				then math.min(slowestPlayer, location.Distance)
 				else location.Distance
+			-- Published for the HUD compass. On a road that bends, which way
+			-- is "on down the road" is a question only the road can answer.
+			local forward = RoadService.GetPathForward(location.Distance)
+			if forward then
+				vehicle:SetAttribute("RoadForward", forward)
+			end
 		end
 	end
 
@@ -1400,6 +1634,7 @@ end
 
 local function recyclePassedChunks()
 	local road = WorldConfig.Road
+	buildFinishLine()
 	local occupancy, slowestPlayer = countOccupancy()
 	local progress = slowestPlayer or 0
 	table.sort(chunks, function(a, b)
@@ -1450,6 +1685,8 @@ function RoadService.Start(seed: number?)
 		return
 	end
 	running = true
+	generationSerial += 1
+	local activeSerial = generationSerial
 
 	directorSeed = seed or (DateTime.now().UnixTimestampMillis % 2 ^ 31)
 	directorRandom = Random.new(directorSeed)
@@ -1486,6 +1723,8 @@ function RoadService.Start(seed: number?)
 	fallbackSpawn.Parent = world
 
 	chunks = {}
+	finishDistance = nil
+	finishModel = nil
 	-- Every run opens on a stretch of boulder plain: forgiving terrain with
 	-- clear sightlines, per the design doc's pressure curve (GDD 4.3).
 	currentFamily = "BoulderPlain"
@@ -1507,7 +1746,7 @@ function RoadService.Start(seed: number?)
 	end
 
 	task.spawn(function()
-		while running do
+		while running and generationSerial == activeSerial do
 			recyclePassedChunks()
 			task.wait(0.5)
 		end
@@ -1518,12 +1757,32 @@ function RoadService.GetSeed(): number
 	return directorSeed
 end
 
+-- Called once a run turns into a race. The gate itself appears as soon as the
+-- road has been generated that far, which is usually within a chunk or two.
+function RoadService.SpawnFinishLine(distance: number)
+	if not running then
+		error("cannot place a finish line before the road has started", 2)
+	end
+	if finishDistance then
+		error("this run already has a finish line", 2)
+	end
+	finishDistance = distance
+	buildFinishLine()
+end
+
+function RoadService.GetFinishDistance(): number?
+	return finishDistance
+end
+
 -- Releases the re-entry guard so the road can be regenerated in-process.
 -- Exists for tests that need to build the same road twice and compare;
 -- gameplay only ever starts the road once.
 function RoadService.Reset()
 	running = false
+	generationSerial += 1
 	chunks = {}
+	finishDistance = nil
+	finishModel = nil
 end
 
 return RoadService
