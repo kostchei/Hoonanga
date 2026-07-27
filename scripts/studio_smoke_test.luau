@@ -33,6 +33,7 @@ local AIService = require(services.AIService)
 local VehicleBuilder = require(services.VehicleBuilder)
 local WeaponState = require(shared.WeaponState)
 local WeaponConfig = require(shared.Config.WeaponConfig)
+local WorldConfig = require(shared.Config.WorldConfig)
 
 -- Creator Store loading has a separate concurrent-loading regression gate.
 -- Keep the broad smoke test deterministic and exercise the safe graybox path.
@@ -53,6 +54,15 @@ ProjectileService.Start()
 FireService.Start()
 CollisionDamageService.Start()
 AIService.Start()
+
+-- Rival convoys are session-owned. The smoke test has no real lobby roster,
+-- so register one explicitly instead of relying on the removed pre-session
+-- singleton enemy.
+local smokeEnemyConvoy =
+	ConvoyService.CreateSingleNPC("Enemy", "Ute", "EnemyUte_01", WorldConfig.Spawn.Enemy)
+local smokeEnemy = smokeEnemyConvoy.Members[1]
+smokeEnemy.Name = "EnemyUte_01"
+AIService.RegisterCompetitor(smokeEnemyConvoy, 4840, 1)
 
 local world = Workspace:FindFirstChild("HoonangaWorld")
 expect(world ~= nil, "RoadService did not create HoonangaWorld")
@@ -106,10 +116,11 @@ end
 expect(forkChunk ~= nil, "fork chunk marked in seenFamilies but not found by lookup")
 expect(forkChunk:FindFirstChild("ForkLaneLeft") ~= nil, "fork chunk has no left lane")
 expect(forkChunk:FindFirstChild("ForkLaneRight") ~= nil, "fork chunk has no right lane")
-expect(
-	forkChunk:FindFirstChild("FuelPickup") ~= nil,
-	"fork chunk's left-lane fuel tradeoff is missing"
-)
+expect(typeof(forkChunk:GetAttribute("ForkSet")) == "string", "fork chunk has no set ID")
+local forkHasResource = forkChunk:FindFirstChild("FuelPickup") ~= nil
+	or forkChunk:FindFirstChild("BulletsPickup") ~= nil
+	or forkChunk:FindFirstChild("RepairPickup") ~= nil
+expect(forkHasResource, "fork chunk has no resource tradeoff")
 
 -- GDD 8.2 chunk metadata. Nothing consumes most of these yet, so without an
 -- assertion they would silently rot as families are added and changed.
@@ -137,7 +148,7 @@ end
 
 local vehicles = world:FindFirstChild("Vehicles")
 expect(vehicles ~= nil, "Vehicles folder is missing")
-local enemy = vehicles:FindFirstChild("EnemyUte_01")
+local enemy = smokeEnemy
 expect(enemy ~= nil, "AIService did not create the enemy ute")
 expect(enemy.PrimaryPart ~= nil, "enemy ute has no primary part")
 expect(not enemy.PrimaryPart.Anchored, "enemy chassis is still kinematic/anchored")

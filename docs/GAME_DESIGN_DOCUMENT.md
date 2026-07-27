@@ -1061,6 +1061,8 @@ The UI describes the obvious tradeoff but does not reveal every encounter.
 - Strong silhouettes at high speed
 - Warm desert palette with biome-specific accents
 - Dust, smoke, and fire used for feedback as well as atmosphere
+- Moving vehicles throw dust from their rear contact points on dry dirt,
+  stone, sand, and salt surfaces. Mud and asphalt never emit this dust.
 - Avoid excessive small debris that obscures targets or harms performance
 
 Each road family needs a distinct distant silhouette:
@@ -1299,9 +1301,15 @@ Build and validate the scope and acceptance criteria in Section 19.
 
 **Exit condition:** Each convoy composition can complete the same seeded run through a distinct but viable playstyle.
 
+**Implementation status (corrected 2026-07-26):** The playable session now
+spawns the selected Roadtrain, two-Ute, or three-Bike convoy and runs its
+companions through formation/combat AI. The earlier completion claim omitted
+this lobby-to-match integration and was corrected with an explicit runtime
+acceptance gate.
+
 ### Milestone 5: Multiplayer and progression
 
-- Two-to-four-player sessions
+- One-to-four-human session foundation
 - Shared branch occupancy
 - Spectating and results
 - Garage
@@ -1312,10 +1320,17 @@ Build and validate the scope and acceptance criteria in Section 19.
 
 **Exit condition:** Complete multiplayer runs remain stable and fair under realistic latency.
 
+**Implementation status (2026-07-26):** The Milestone 5 code path and automated
+acceptance checks are complete. The realistic-latency multiplayer soak remains
+a manual release validation gate; it is not replaced by headless tests.
+
 ### Milestone 6: Content and launch preparation
 
 - Full initial chunk library
 - Environment art pass
+- Reference-driven armored eight-wheel Roadtrain visual pass
+- Distinct open ammunition-crate and handled fuel-jerrycan pickup props
+- Rear vehicle dust on dry surfaces, suppressed on mud and asphalt
 - Audio pass
 - Onboarding
 - Controller support
@@ -1324,6 +1339,36 @@ Build and validate the scope and acceptance criteria in Section 19.
 - Analytics
 - Economy tuning
 - Compliance and publication preparation
+
+**Implementation status (2026-07-26):** Milestone 6 code paths and automated
+acceptance coverage are implemented. Published-place analytics, representative
+device/MicroProfiler evidence, asset-permission verification, and Creator
+Dashboard compliance remain manual launch gates.
+
+### Milestone 7: Rival convoy endgame
+
+- Three-to-six total competitors
+- Exactly two server-owned AI players
+- AI selection of convoy classes humans did not choose
+- Per-vehicle speed, accuracy, aggression, and vendetta
+- Proactive AI ammunition use and voluntary attacks
+- Damage-triggered taunts and vendetta retaliation
+- Final stretch after the first complete competitor elimination
+- Finish line in the next ungenerated road chunk
+- Server-authoritative finish crossing
+- Bounded drop-off-the-back warning, grace, and DNF
+- Six-competitor and fifteen-vehicle match validation
+
+**Exit condition:** Repeated three-to-six-competitor matches, with exactly two AI
+players and all three convoy classes represented, reliably produce one
+server-confirmed winner at the reserved finish chunk, apply fair drop-off rules,
+and preserve correct results under realistic latency.
+
+**Implementation status (2026-07-26):** The three-to-six roster, exactly two
+session-owned AI rivals, missing-class allocation, and independent per-vehicle
+trait rolls are operational. Taunt/vendetta reactions, finish reservation,
+finish crossing, drop-off DNF, AI result integration, and full traversal/soak
+gates remain open.
 
 ---
 

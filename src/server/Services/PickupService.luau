@@ -11,16 +11,41 @@
 -- a resource and a trap.
 
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
+local AnalyticsService = require(script.Parent.AnalyticsService)
+local AudioService = require(script.Parent.AudioService)
 local CombatService = require(script.Parent.CombatService)
 local ConvoyService = require(script.Parent.ConvoyService)
+local EconomyService = require(script.Parent.EconomyService)
 local WeaponService = require(script.Parent.WeaponService)
 
 local PICKUP_TAG = "HoonangaPickup"
 
 local bound: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
+local function ownerForVehicle(vehicle: Model): Player?
+	local convoy = ConvoyService.GetByVehicle(vehicle)
+	return if convoy and convoy.OwnerUserId > 0
+		then Players:GetPlayerByUserId(convoy.OwnerUserId)
+		else nil
+end
+
+local function recordPickup(vehicle: Model, pickupType: string, amount: number)
+	local owner = ownerForVehicle(vehicle)
+	if owner then
+		local current = owner:GetAttribute("Pickups")
+		owner:SetAttribute("Pickups", (if typeof(current) == "number" then current else 0) + 1)
+		AnalyticsService.LogEvent(owner, "PickupCollected", {
+			PickupType = pickupType,
+			Amount = amount,
+			DistanceRank = owner:GetAttribute("DistanceRank") or 1,
+		})
+		AudioService.PlayGlobalEffect("PickupCollected", owner)
+	end
+end
 
 local function requireNumber(instance: Instance, attribute: string): number
 	local value = instance:GetAttribute(attribute)
@@ -52,6 +77,15 @@ local function collect(pickup: BasePart, vehicle: Model): boolean
 		error(string.format("%s has no PickupType attribute", pickup:GetFullName()))
 	end
 	local amount = requireNumber(pickup, "PickupAmount")
+	local owner = ownerForVehicle(vehicle)
+	if owner then
+		local distanceRank = owner:GetAttribute("DistanceRank")
+		amount = EconomyService.ApplyPickupBonus(
+			owner,
+			amount,
+			if typeof(distanceRank) == "number" then distanceRank else 1
+		)
+	end
 
 	if pickupType == "Fuel" then
 		return collectFuel(vehicle, amount)
@@ -78,8 +112,8 @@ local function bindPickup(instance: Instance)
 		end
 
 		local vehicle = CombatService.GetVehicleFromPart(hit)
-		-- Enemy convoys do not resupply from player-route pickups; contention
-		-- between convoys is a Milestone 5 problem (GDD 24.4).
+		-- NPC convoys do not consume route resources. Every human-owned
+		-- convoy can contest the same physical pickup.
 		if not vehicle or vehicle:GetAttribute("Team") ~= "Player" then
 			return
 		end
@@ -91,6 +125,11 @@ local function bindPickup(instance: Instance)
 			return
 		end
 
+		recordPickup(
+			vehicle,
+			instance:GetAttribute("PickupType") :: string,
+			instance:GetAttribute("PickupAmount") :: number
+		)
 		instance:SetAttribute("Collected", true)
 		instance:Destroy()
 	end)

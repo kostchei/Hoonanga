@@ -19,6 +19,9 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PerformanceConfig = require(ReplicatedStorage.Shared.Config.PerformanceConfig)
 
 -- 3x3 tiles of 2000 studs reaches 3000 studs in every direction, which is
 -- past the point where the atmosphere has hazed the ground into the sky.
@@ -267,10 +270,19 @@ function SkyController.Start()
 	buildHorizon()
 	buildHalo(gui)
 
+	local lowModeElapsed = 0
 	RunService.RenderStepped:Connect(function(deltaTime)
 		local camera = Workspace.CurrentCamera
 		if not camera then
 			return
+		end
+		if player:GetAttribute("LowPerformanceMode") == true then
+			lowModeElapsed += deltaTime
+			if lowModeElapsed < 1 / PerformanceConfig.LowModeVisualHz then
+				return
+			end
+			deltaTime = lowModeElapsed
+			lowModeElapsed = 0
 		end
 		updateHorizon(camera, deltaTime)
 		updateHalo(camera)

@@ -80,17 +80,38 @@ scripts/run_studio_test.sh default.project.json scripts/studio_smoke_test.luau s
 | `scripts/convoy_failure_test.luau` | `convoy-failure` | `^M4_CONVOY_FAILURE_OK$` |
 | `scripts/convoy_seed_balance_test.luau` | `convoy-balance` | `^M4_CONVOY_BALANCE_OK$` |
 | `scripts/convoy_stress_test.luau` | `convoy-stress` | `^M4_CONVOY_STRESS_OK$` |
+| `scripts/milestone4_session_convoy_integration_test.luau` | `m4-session-convoy` | `^\[M4_SESSION_CONVOY\] PASS:` |
+| `scripts/milestone5_service_start_test.luau` | `m5-start` | `^\[M5_START\] PASS:` |
+| `scripts/multiplayer_session_test.luau` | `m5-session` | `^\[SESSION\] PASS:` |
+| `scripts/progression_datastore_test.luau` | `m5-progression` | `^\[PROGRESSION\] PASS:` |
+| `scripts/milestone5_upgrade_authority_test.luau` | `m5-upgrade` | `^\[M5_UPGRADE\] PASS:` |
+| `scripts/milestone5_input_mode_test.luau` | `m5-input` | `^\[M5_INPUT\] PASS:` |
+| `scripts/environment_biome_test.luau` | `m6-environment` | `^\[ENVIRONMENT\] PASS:` |
+| `scripts/milestone6_content_runtime_test.luau` | `m6-content` | `^\[M6_CONTENT\] PASS:` |
+| `scripts/audio_engine_test.luau` | `m6-audio` | `^\[AUDIO\] PASS:` |
+| `scripts/onboarding_flow_test.luau` | `m6-onboarding` | `^\[TUTORIAL\] PASS:` |
+| `scripts/gamepad_input_test.luau` | `m6-controller` | `^\[GAMEPAD\] PASS:` |
+| `scripts/analytics_event_test.luau` | `m6-analytics` | `^\[ANALYTICS\] PASS:` |
+| `scripts/milestone6_performance_policy_test.luau` | `m6-performance` | `^\[M6_PERFORMANCE\] PASS:` |
+| `scripts/milestone6_service_start_test.luau` | `m6-start` | `^\[M6_START\] PASS:` |
+| `scripts/milestone6_dust_policy_test.luau` | `m6-dust` | `^\[M6_DUST\] PASS:` |
+| `scripts/milestone6_pickup_art_test.luau` | `m6-pickup-art` | `^\[M6_PICKUP_ART\] PASS:` |
+| `scripts/milestone6_roadtrain_art_test.luau` | `m6-roadtrain-art` | `^\[M6_ROADTRAIN_ART\] PASS:` |
 
-### Milestone 4 test controls
+### Lobby and match controls
 
-The current pre-garage selector is intentionally small:
+Convoy class, starting primary weapon, and paint preset are selected in the
+lobby garage. Readying locks the selection for that match.
 
-- `F1`: one roadtrain
-- `F2`: two utes
-- `F3`: three bikes
+- `F1`: select roadtrain while in the lobby
+- `F2`: select two-ute convoy while in the lobby
+- `F3`: select three-bike convoy while in the lobby
+- `G`: show or hide the garage during lobby/countdown
+- `Q` / `E`: cycle valid spectate targets after elimination
 
-Selecting a class starts a fresh run. Control transfers automatically after
-vehicle or operator loss; voluntary mid-convoy transfer is still deferred.
+The mouse is visible and unlocked in Lobby, Countdown, Results, spectating,
+and modal upgrade selection. It is locked only for active driving. Control
+transfers automatically after vehicle or operator loss.
 
 See [the game design document](docs/GAME_DESIGN_DOCUMENT.md) for the agreed scope and milestone plan.
 

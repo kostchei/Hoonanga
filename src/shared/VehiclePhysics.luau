@@ -206,6 +206,11 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	local grounded = groundedWheels > 0
 	if not grounded then
 		grip = 0
+	else
+		local upgradeGrip = vehicle:GetAttribute("UpgradeGripMultiplier")
+		if typeof(upgradeGrip) == "number" then
+			grip = math.clamp(grip * upgradeGrip, 0, 1.35)
+		end
 	end
 
 	local throttle = if vehicle:GetAttribute("OutOfFuel") == true
@@ -237,6 +242,10 @@ function VehiclePhysics.Step(vehicle: Model, input: VehicleInput, deltaTime: num
 	local speedScale = if typeof(speedScaleAttribute) == "number"
 		then math.clamp(speedScaleAttribute, 0.1, 1.15)
 		else 1
+	local upgradeSpeedAttribute = vehicle:GetAttribute("UpgradeSpeedMultiplier")
+	if typeof(upgradeSpeedAttribute) == "number" then
+		speedScale *= math.clamp(upgradeSpeedAttribute, 0.5, 1.5)
+	end
 
 	local bogDriveScale = 1 - state.BogLevel * 0.62
 	local surfaceDriveScale = math.clamp(math.max(grip, 0.65), 0.2, 1.05)

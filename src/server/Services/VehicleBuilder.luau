@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local VehicleConfig = require(ReplicatedStorage.Shared.Config.VehicleConfig)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
+local RoadtrainArtBuilder = require(script.Parent.RoadtrainArtBuilder)
 
 local CHASSIS_SIZE = Vector3.new(6.4, 1.8, 15.4)
 local PICKUP_ASSET_ID = 6418225759
@@ -630,24 +631,8 @@ local function createGrayboxVehicle(
 	body.Parent = vehicle
 
 	if vehicleType == "Roadtrain" then
-		local cabin = makePart(
-			"Cabin",
-			Vector3.new(8.2, 4.6, 6.8),
-			bodyColor:Lerp(Color3.new(0, 0, 0), 0.12),
-			Enum.Material.Metal
-		)
-		cabin.CanCollide = false
-		weldToChassis(chassis, cabin, CFrame.new(0, 4.1, -7.2))
-		cabin.Parent = vehicle
-		local tray = makePart(
-			"CargoDeck",
-			Vector3.new(8.4, 0.8, 11.2),
-			Color3.fromRGB(80, 72, 63),
-			Enum.Material.DiamondPlate
-		)
-		tray.CanCollide = false
-		weldToChassis(chassis, tray, CFrame.new(0, 3.25, 4.2))
-		tray.Parent = vehicle
+		body.Transparency = 1
+		RoadtrainArtBuilder.Build(vehicle, chassis, bodyColor)
 	else
 		local tank = makePart(
 			"FuelTankVisual",

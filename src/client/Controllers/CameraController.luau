@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
+local InputModeController = require(script.Parent.InputModeController)
 local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
@@ -19,7 +20,6 @@ local activeAttachment: Attachment? = nil
 local yaw = 0
 local pitch = 0
 local hiddenParts: { BasePart } = {}
-local isMouseUnlocked = false
 
 local function restoreHiddenParts()
 	for _, part in hiddenParts do
@@ -94,8 +94,9 @@ function CameraController.Start()
 			or input.KeyCode == Enum.KeyCode.Tab
 			or input.KeyCode == Enum.KeyCode.M
 		then
-			isMouseUnlocked = not isMouseUnlocked
-			if isMouseUnlocked then
+			local unlocked = not InputModeController.IsPointerUnlocked()
+			InputModeController.SetModalOpen(unlocked)
+			if unlocked then
 				yaw = 0
 				pitch = 0
 			end
@@ -105,7 +106,7 @@ function CameraController.Start()
 	UserInputService.InputChanged:Connect(function(input)
 		if
 			not activeAttachment
-			or isMouseUnlocked
+			or InputModeController.IsPointerUnlocked()
 			or input.UserInputType ~= Enum.UserInputType.MouseMovement
 		then
 			return
@@ -126,20 +127,10 @@ function CameraController.Start()
 				refreshCameraMode()
 			end
 
-			if activeAttachment then
-				if isMouseUnlocked then
-					UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-					UserInputService.MouseIconEnabled = true
-					-- Reset camera look angles straight forward while navigating UI
-					yaw = 0
-					pitch = 0
-				else
-					UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-					UserInputService.MouseIconEnabled = false
-				end
-			else
-				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-				UserInputService.MouseIconEnabled = true
+			if activeAttachment and InputModeController.IsPointerUnlocked() then
+				-- Reset camera look angles straight forward while navigating UI.
+				yaw = 0
+				pitch = 0
 			end
 
 			local attachment = activeAttachment
@@ -161,7 +152,7 @@ function CameraController.Start()
 end
 
 function CameraController.SetMouseUnlocked(unlocked: boolean)
-	isMouseUnlocked = unlocked
+	InputModeController.SetModalOpen(unlocked)
 	if unlocked then
 		yaw = 0
 		pitch = 0
@@ -169,7 +160,15 @@ function CameraController.SetMouseUnlocked(unlocked: boolean)
 end
 
 function CameraController.IsMouseUnlocked(): boolean
-	return isMouseUnlocked
+	return InputModeController.IsPointerUnlocked()
+end
+
+function CameraController.AddGamepadLook(yawDelta: number, pitchDelta: number)
+	if not activeAttachment or InputModeController.IsPointerUnlocked() then
+		return
+	end
+	yaw = math.clamp(yaw - yawDelta, -MAX_YAW, MAX_YAW)
+	pitch = math.clamp(pitch + pitchDelta, MIN_PITCH, MAX_PITCH)
 end
 
 return CameraController

@@ -42,4 +42,10 @@ local STEPS: { TutorialStep } = {
 
 return {
 	Steps = STEPS,
+	DistanceThresholds = {
+		Steering = 300,
+		Combat = 800,
+		Fuel = 1500,
+		Forks = 2500,
+	},
 }

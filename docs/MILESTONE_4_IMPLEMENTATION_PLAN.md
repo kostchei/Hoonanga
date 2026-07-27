@@ -1,6 +1,6 @@
 # Milestone 4: Convoys — Implementation Plan
 
-**Status:** Implemented — automated validation complete
+**Status:** Implemented — session integration corrected and runtime-validated
 **Milestone:** 4 — Convoys  
 **Source of truth:** `docs/GAME_DESIGN_DOCUMENT.md`  
 **Exit condition:** Each convoy composition can complete the same seeded run through a distinct but viable playstyle.
@@ -24,6 +24,7 @@ control transfer, and final elimination.
 | 8 — Cross-system lifecycle | Complete | combat, recycle, transfer, and failure gates |
 | 9 — Client feedback | Complete | explicit controlled-vehicle lookup, convoy HUD, transfer feedback, class selector |
 | 10 — Balance validation | Complete (automated baseline) | fixed seed `4404`, fuel-duration class gate, twelve-vehicle stress gate |
+| 11 — Playable session integration correction | Complete | `milestone4_session_convoy_integration_test`, multiplayer session, composition, formation, and smoke gates |
 
 The automated suite covers all three compositions, same- and cross-convoy
 hostility, partial and final loss, operator loss with intact hull, shared fuel,
@@ -31,6 +32,15 @@ zero-fuel recovery, deterministic repair routing, formation outputs on the
 curved road path, validated companion ammunition use, and twelve simultaneous
 vehicles. A subjective first-person camera/handling playtest remains advisable
 before release, but it is not an unimplemented code checkpoint.
+
+**Correction (2026-07-26):** The original completion claim was too broad.
+Composition and companion tests constructed records directly, while the playable
+session still required two humans and deleted its singleton pre-session enemy.
+The corrected path admits one to four humans, adds exactly two session-owned AI
+rivals after cleanup, fills missing Roadtrain/Ute/Bike classes, and rolls
+independent Speed, Accuracy, Aggression, and Vendetta values per AI vehicle.
+`milestone4_session_convoy_integration_test` now guards the path that the earlier
+isolated tests missed.
 
 ### Delivered defaults
 

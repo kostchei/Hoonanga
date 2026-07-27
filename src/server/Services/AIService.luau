@@ -1,33 +1,22 @@
 --!strict
 
-local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local AIRosterPolicy = require(ReplicatedStorage.Shared.AIRosterPolicy)
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
-local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 local RoadService = require(script.Parent.RoadService)
 local CombatService = require(script.Parent.CombatService)
 local ConvoyService = require(script.Parent.ConvoyService)
-local VehicleService = require(script.Parent.VehicleService)
 local WeaponService = require(script.Parent.WeaponService)
 
-local enemyVehicle: Model? = nil
-local lastFireAttempt = 0
+local aiCompetitors: { [string]: ConvoyService.ConvoyRecord } = {}
+local rivalLastFire: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 local companionLastFire: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
--- How often the AI *decides* to shoot, not how fast it shoots: WeaponService
--- still enforces each weapon's own fire interval on top of this. Deliberately
--- slower than the machine gun's 0.1s so the enemy reads as an opponent
--- squeezing off bursts rather than a continuous stream of damage.
-local AI_FIRE_INTERVAL = 0.25
-
--- Below 1 so the player can actually run the enemy down; without this the
--- enemy shares the player's top speed and, having spawned ahead, can never
--- be caught.
-local AI_MAX_SPEED_SCALE = 0.88
+local started = false
 -- Inside this range the enemy stops charging and fights alongside instead
 -- of overshooting past the player and having to loop back every pass.
 local ENGAGE_RANGE = 110
@@ -35,16 +24,6 @@ local ENGAGE_RANGE = 110
 -- a perfectly-tracking enemy reads as a homing missile, not a driver.
 local STEER_ERROR = 0.22
 local STEER_ERROR_RATE = 0.45
-
-local function targetVehicle(): Model?
-	for _, player in Players:GetPlayers() do
-		local vehicle = VehicleService.GetPlayerVehicle(player)
-		if vehicle and vehicle.Parent and not vehicle:GetAttribute("Destroyed") then
-			return vehicle
-		end
-	end
-	return nil
-end
 
 -- How far ahead the AI looks when it has nothing to chase. Long enough to
 -- read a bend and start turning into it, short enough that it does not cut
@@ -139,6 +118,7 @@ end
 -- enemy out of rockets closes to gun range instead of dry-firing.
 local ROCKET_RANGE = 210
 local FLAME_RANGE = 42
+local findCompanionTarget: (Model) -> Model?
 
 local function chooseWeapon(vehicle: Model, distance: number): string
 	if distance <= FLAME_RANGE and WeaponState.GetPool(vehicle, "FlameFuel") > 0 then
@@ -150,19 +130,18 @@ local function chooseWeapon(vehicle: Model, distance: number): string
 	return "MachineGun"
 end
 
-local function updateEnemy(deltaTime: number)
-	local vehicle = enemyVehicle
-	if not vehicle or not vehicle.Parent or vehicle:GetAttribute("Destroyed") then
-		return
-	end
+local function numberAttribute(vehicle: Model, name: string, fallback: number): number
+	local value = vehicle:GetAttribute(name)
+	return if typeof(value) == "number" then value else fallback
+end
 
+local function updateRivalLeader(vehicle: Model, deltaTime: number, now: number)
 	local chassis = vehicle.PrimaryPart
 	if not chassis then
 		return
 	end
 
-	local target = targetVehicle()
-	local now = Workspace:GetServerTimeNow()
+	local target = findCompanionTarget(vehicle)
 	local steer, throttle = calculateDriving(chassis, target, now)
 	vehicle:SetAttribute("ServerThrottle", throttle)
 	vehicle:SetAttribute("ServerSteer", steer)
@@ -176,21 +155,30 @@ local function updateEnemy(deltaTime: number)
 	if target and target.PrimaryPart then
 		local muzzle = chassis:FindFirstChild("TurretMuzzleAttachment")
 		if muzzle and muzzle:IsA("Attachment") then
-			if now - lastFireAttempt >= AI_FIRE_INTERVAL then
-				lastFireAttempt = now
+			local aggression = numberAttribute(vehicle, "AIAggression", 0.5)
+			local fireInterval = 0.62 - aggression * 0.46
+			local lastAttempt = rivalLastFire[vehicle] or 0
+			if now - lastAttempt >= fireInterval then
+				rivalLastFire[vehicle] = now
 				local distance = (target.PrimaryPart.Position - chassis.Position).Magnitude
 				WeaponService.SelectWeapon(vehicle, chooseWeapon(vehicle, distance))
 				local predictedPosition = target.PrimaryPart.Position
 					+ target.PrimaryPart.AssemblyLinearVelocity * 0.08
-				local aimError =
-					Vector3.new(math.noise(now * 0.7) * 7, math.noise(now * 0.8 + 10) * 4, 0)
+				local inaccuracy = 1 - numberAttribute(vehicle, "AIAccuracy", 0.7)
+				local aimError = Vector3.new(
+					math.noise(now * 0.7, vehicle:GetAttribute("AIRosterSlot") or 0)
+						* 22
+						* inaccuracy,
+					math.noise(now * 0.8 + 10) * 12 * inaccuracy,
+					0
+				)
 				WeaponService.TryFire(vehicle, predictedPosition + aimError - muzzle.WorldPosition)
 			end
 		end
 	end
 end
 
-local function findCompanionTarget(vehicle: Model): Model?
+findCompanionTarget = function(vehicle: Model): Model?
 	local chassis = vehicle.PrimaryPart
 	if not chassis then
 		return nil
@@ -293,7 +281,8 @@ local function updateCompanion(
 		elseif pathLag < -15 then 0.25
 		else 0.72
 	throttle *= obstacleThrottle
-	vehicle:SetAttribute("MaxSpeedScale", if pathLag > 120 then 1.1 else 1)
+	local aiSpeed = numberAttribute(vehicle, "AISpeed", 1)
+	vehicle:SetAttribute("MaxSpeedScale", aiSpeed * (if pathLag > 120 then 1.05 else 1))
 	vehicle:SetAttribute("CatchUpActive", pathLag > 120)
 	vehicle:SetAttribute("ServerThrottle", throttle)
 	vehicle:SetAttribute("ServerSteer", steer)
@@ -313,15 +302,18 @@ local function updateCompanion(
 		return
 	end
 	local lastAttempt = companionLastFire[vehicle] or 0
-	if now - lastAttempt < 0.38 then
+	local aggression = numberAttribute(vehicle, "AIAggression", 0.5)
+	local fireInterval = 0.65 - aggression * 0.4
+	if now - lastAttempt < fireInterval then
 		return
 	end
 	companionLastFire[vehicle] = now
 	local distance = (combatTarget.PrimaryPart.Position - chassis.Position).Magnitude
 	WeaponService.SelectWeapon(vehicle, chooseWeapon(vehicle, distance))
+	local inaccuracy = 1 - numberAttribute(vehicle, "AIAccuracy", 0.62)
 	local aimError = Vector3.new(
-		math.noise(now * 0.6, vehicle:GetAttribute("FormationSlot") or 0) * 9,
-		math.noise(now * 0.7 + 11) * 5,
+		math.noise(now * 0.6, vehicle:GetAttribute("FormationSlot") or 0) * 20 * inaccuracy,
+		math.noise(now * 0.7 + 11) * 12 * inaccuracy,
 		0
 	)
 	local prediction = combatTarget.PrimaryPart.Position
@@ -339,9 +331,42 @@ local function updateCompanions(deltaTime: number)
 			continue
 		end
 		local leader = record.ControlledVehicle
-		if not leader or not ConvoyService.IsOperational(leader) then
+		if
+			not leader
+			or not ConvoyService.IsOperational(leader)
+			or leader:GetAttribute("MatchInputEnabled") == false
+		then
 			continue
 		end
+		for _, vehicle in record.Members do
+			if vehicle ~= leader and ConvoyService.IsOperational(vehicle) then
+				updateCompanion(record, vehicle, leader, deltaTime, now)
+			end
+		end
+	end
+end
+
+local function firstOperational(record: ConvoyService.ConvoyRecord): Model?
+	for _, vehicle in record.Members do
+		if ConvoyService.IsOperational(vehicle) then
+			return vehicle
+		end
+	end
+	return nil
+end
+
+local function updateCompetitors(deltaTime: number)
+	local now = Workspace:GetServerTimeNow()
+	for id, record in aiCompetitors do
+		if record.Ended or not record.Model.Parent then
+			aiCompetitors[id] = nil
+			continue
+		end
+		local leader = firstOperational(record)
+		if not leader then
+			continue
+		end
+		updateRivalLeader(leader, deltaTime, now)
 		for _, vehicle in record.Members do
 			if vehicle ~= leader and ConvoyService.IsOperational(vehicle) then
 				updateCompanion(record, vehicle, leader, deltaTime, now)
@@ -360,24 +385,56 @@ function AIService.FindCompanionTargetForTest(vehicle: Model): Model?
 	return findCompanionTarget(vehicle)
 end
 
-function AIService.Start()
-	if not WorldConfig.Testing.EnemyEnabled then
-		print("[Hoonanga] Enemy ute disabled for initial driving test")
-	else
-		local enemyConvoy =
-			ConvoyService.CreateSingleNPC("Enemy", "Ute", "EnemyUte_01", WorldConfig.Spawn.Enemy)
-		enemyVehicle = enemyConvoy.Members[1]
-		enemyVehicle:SetAttribute("DamageMultiplier", 0.2)
-		enemyVehicle:SetAttribute("MaxSpeedScale", AI_MAX_SPEED_SCALE)
-
-		local chassis = enemyVehicle.PrimaryPart
+function AIService.RegisterCompetitor(
+	record: ConvoyService.ConvoyRecord,
+	matchSeed: number,
+	aiSlot: number
+)
+	aiCompetitors[record.Id] = record
+	record.Model:SetAttribute("AICompetitor", true)
+	record.Model:SetAttribute("AIRosterSlot", aiSlot)
+	for vehicleSlot, vehicle in record.Members do
+		local traits = AIRosterPolicy.RollTraits(matchSeed, aiSlot, record.ClassId, vehicleSlot)
+		vehicle:SetAttribute("AICompetitor", true)
+		vehicle:SetAttribute("AIRosterSlot", aiSlot)
+		vehicle:SetAttribute("AISpeed", traits.Speed)
+		vehicle:SetAttribute("AIAccuracy", traits.Accuracy)
+		vehicle:SetAttribute("AIAggression", traits.Aggression)
+		vehicle:SetAttribute("AIVendetta", traits.Vendetta)
+		vehicle:SetAttribute("MaxSpeedScale", traits.Speed)
+		vehicle:SetAttribute("DamageMultiplier", 0.35)
+		local chassis = vehicle.PrimaryPart
 		if chassis and chassis:CanSetNetworkOwnership() then
 			chassis:SetNetworkOwner(nil)
 		end
 	end
+end
+
+function AIService.ResetCompetitors()
+	table.clear(aiCompetitors)
+	table.clear(rivalLastFire)
+end
+
+function AIService.GetCompetitorsForTest(): { ConvoyService.ConvoyRecord }
+	local result = {}
+	for _, record in aiCompetitors do
+		table.insert(result, record)
+	end
+	return result
+end
+
+function AIService.StepCompetitorsForTest(deltaTime: number)
+	updateCompetitors(deltaTime)
+end
+
+function AIService.Start()
+	if started then
+		return
+	end
+	started = true
 
 	RunService.PreSimulation:Connect(function(deltaTime)
-		updateEnemy(deltaTime)
+		updateCompetitors(deltaTime)
 		updateCompanions(deltaTime)
 	end)
 end

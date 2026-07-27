@@ -6,11 +6,16 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local ConvoyConfig = require(ReplicatedStorage.Shared.Config.ConvoyConfig)
+local ProgressionConfig = require(ReplicatedStorage.Shared.Config.ProgressionConfig)
+local SurfaceProfiles = require(ReplicatedStorage.Shared.Config.SurfaceProfiles)
 local VehicleConfig = require(ReplicatedStorage.Shared.Config.VehicleConfig)
+local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
 local WorldConfig = require(ReplicatedStorage.Shared.Config.WorldConfig)
 local ConvoyService = require(script.Parent.ConvoyService)
+local ProgressionService = require(script.Parent.ProgressionService)
 local RemoteService = require(script.Parent.RemoteService)
+local UpgradeService = require(script.Parent.UpgradeService)
 
 type ValidationState = {
 	Position: Vector3,
@@ -145,9 +150,58 @@ local function resetValidation(player: Player, vehicle: Model?)
 	end
 end
 
+local function updateServerSurface(vehicle: Model)
+	local chassis = vehicle.PrimaryPart
+	if not chassis then
+		return
+	end
+	local vehicleType = vehicle:GetAttribute("VehicleType")
+	local config = if typeof(vehicleType) == "string" then VehicleConfig[vehicleType] else nil
+	if not config then
+		return
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { vehicle }
+	params.IgnoreWater = false
+	local groundedWheels = 0
+	local surfaceName = "Air"
+	local lowestGrip = math.huge
+	for _, contact in config.WheelContacts do
+		local attachment = chassis:FindFirstChild("SuspensionPoint" .. contact.Name)
+		if attachment and attachment:IsA("Attachment") then
+			local length = config.Suspension.RideHeight + config.Suspension.RayLength + 1
+			local result = Workspace:Raycast(
+				attachment.WorldPosition,
+				-chassis.CFrame.UpVector * length,
+				params
+			)
+			if result then
+				groundedWheels += 1
+				local candidate = result.Instance:GetAttribute("SurfaceProfile")
+				if typeof(candidate) == "string" then
+					local profile = SurfaceProfiles[candidate]
+					if profile and profile.Grip < lowestGrip then
+						lowestGrip = profile.Grip
+						surfaceName = candidate
+					end
+				end
+			end
+		end
+	end
+	vehicle:SetAttribute("ServerSurfaceProfile", surfaceName)
+	vehicle:SetAttribute("ServerGroundedWheels", groundedWheels)
+	vehicle:SetAttribute(
+		"ServerForwardSpeed",
+		chassis.AssemblyLinearVelocity:Dot(chassis.CFrame.LookVector)
+	)
+end
+
 local function createPlayerConvoy(
 	player: Player,
-	requestedClass: string?
+	requestedClass: string?,
+	spawnCFrame: CFrame?
 ): ConvoyService.ConvoyRecord
 	player:SetAttribute("Kills", 0)
 	player:SetAttribute("RunEnded", false)
@@ -158,13 +212,40 @@ local function createPlayerConvoy(
 		then requestedClass
 		else "Ute"
 	player:SetAttribute("SelectedConvoyClass", classId)
-	local spawnOffset = (#Players:GetPlayers() - 1) * 18
-	local spawn = WorldConfig.Spawn.Player * CFrame.new(spawnOffset, 0, 0)
+	local spawn = spawnCFrame or WorldConfig.Spawn.Player
 	local convoy = ConvoyService.Create(player.UserId, "Player", classId, spawn)
 	player:SetAttribute("ConvoyId", convoy.Id)
+	local profile = ProgressionService.GetProfile(player)
+	local cosmetic = ProgressionConfig.Cosmetics[profile.EquippedCosmetic]
 	for _, vehicle in convoy.Members do
 		bindSeat(vehicle)
+		vehicle:SetAttribute("MatchInputEnabled", true)
+		vehicle:SetAttribute("EquippedCosmetic", profile.EquippedCosmetic)
+		vehicle:SetAttribute("EquippedPrimaryWeapon", profile.EquippedWeapon)
+		vehicle:SetAttribute("EquippedSecondaryWeapon", profile.EquippedSecondary)
+		if WeaponConfig.Weapons[profile.EquippedWeapon] then
+			vehicle:SetAttribute("ActiveWeapon", profile.EquippedWeapon)
+		end
+		if cosmetic then
+			vehicle:SetAttribute("CosmeticPrimaryColor", cosmetic.PrimaryColor)
+			vehicle:SetAttribute("CosmeticSecondaryColor", cosmetic.SecondaryColor)
+			for _, descendant in vehicle:GetDescendants() do
+				if
+					descendant:IsA("BasePart")
+					and (
+						descendant.Name == "Body"
+						or descendant.Name == "Cabin"
+						or descendant.Name == "Hood"
+						or descendant.Name == "BikeFrame"
+						or descendant:GetAttribute("CosmeticPaintPart") == true
+					)
+				then
+					descendant.Color = cosmetic.PrimaryColor
+				end
+			end
+		end
 	end
+	UpgradeService.ApplyToConvoy(player, convoy)
 	resetValidation(player, convoy.ControlledVehicle)
 	return convoy
 end
@@ -183,6 +264,7 @@ local function validatePlayerVehicle(player: Player, vehicle: Model, now: number
 	if deltaTime < VALIDATION_INTERVAL then
 		return
 	end
+	updateServerSurface(vehicle)
 	local delta = chassis.Position - state.Position
 	local horizontalDistance = Vector3.new(delta.X, 0, delta.Z).Magnitude
 	local vehicleType = vehicle:GetAttribute("VehicleType") or "Ute"
@@ -214,18 +296,14 @@ local function validatePlayerVehicle(player: Player, vehicle: Model, now: number
 end
 
 local function addPlayer(player: Player)
-	createPlayerConvoy(player, player:GetAttribute("SelectedConvoyClass") :: string?)
 	player.CharacterAdded:Connect(function(character)
 		local convoy = ConvoyService.GetForPlayer(player)
-		if not convoy or convoy.Ended then
-			if convoy then
-				ConvoyService.Remove(convoy, true)
-			end
-			createPlayerConvoy(player, player:GetAttribute("SelectedConvoyClass") :: string?)
+		if convoy and not convoy.Ended then
+			task.defer(bindPlayerToControlledVehicle, player, character)
 		end
-		task.defer(bindPlayerToControlledVehicle, player, character)
 	end)
-	if player.Character then
+	local convoy = ConvoyService.GetForPlayer(player)
+	if player.Character and convoy and not convoy.Ended then
 		task.defer(bindPlayerToControlledVehicle, player, player.Character)
 	end
 end
@@ -303,6 +381,7 @@ function VehicleService.Start()
 				not vehicle
 				or not ConvoyService.IsOperational(vehicle)
 				or vehicle:GetAttribute("ControlledByUserId") ~= player.UserId
+				or vehicle:GetAttribute("MatchInputEnabled") ~= true
 			then
 				return
 			end
@@ -310,21 +389,6 @@ function VehicleService.Start()
 			vehicle:SetAttribute("ServerSteer", math.clamp(steer, -1, 1))
 			vehicle:SetAttribute("ServerHandbrake", handbrake)
 		end)
-
-	RemoteService.Get("SelectConvoyClass").OnServerEvent:Connect(function(player, classId)
-		if typeof(classId) ~= "string" or not ConvoyConfig[classId] then
-			return
-		end
-		local old = ConvoyService.GetForPlayer(player)
-		if old then
-			ConvoyService.Remove(old, true)
-		end
-		local convoy = createPlayerConvoy(player, classId)
-		if player.Character then
-			task.defer(bindPlayerToControlledVehicle, player, player.Character)
-		end
-		print(string.format("[Hoonanga] %s selected %s convoy", player.Name, convoy.ClassId))
-	end)
 
 	for _, player in Players:GetPlayers() do
 		task.spawn(addPlayer, player)
@@ -374,10 +438,62 @@ function VehicleService.GetPlayerVehicle(player: Player): Model?
 	return ConvoyService.GetControlledVehicle(player)
 end
 
+function VehicleService.SpawnMatchConvoy(
+	player: Player,
+	classId: string,
+	spawnCFrame: CFrame
+): ConvoyService.ConvoyRecord
+	local existing = ConvoyService.GetForPlayer(player)
+	if existing then
+		ConvoyService.Remove(existing, true)
+	end
+	local convoy = createPlayerConvoy(player, classId, spawnCFrame)
+	if player.Character then
+		task.defer(bindPlayerToControlledVehicle, player, player.Character)
+	end
+	return convoy
+end
+
+function VehicleService.RemovePlayerConvoy(player: Player, destroyVehicles: boolean?)
+	local convoy = ConvoyService.GetForPlayer(player)
+	validationStates[player] = nil
+	if convoy then
+		ConvoyService.Remove(convoy, destroyVehicles ~= false)
+	end
+	player:SetAttribute("ConvoyId", nil)
+	player:SetAttribute("ControlledVehicleName", "")
+end
+
+function VehicleService.RemoveAllPlayerConvoys()
+	for _, player in Players:GetPlayers() do
+		VehicleService.RemovePlayerConvoy(player, true)
+	end
+end
+
+function VehicleService.SetMatchInputEnabled(enabled: boolean)
+	for _, player in Players:GetPlayers() do
+		local convoy = ConvoyService.GetForPlayer(player)
+		if convoy then
+			for _, vehicle in convoy.Members do
+				vehicle:SetAttribute("MatchInputEnabled", enabled)
+				if not enabled then
+					vehicle:SetAttribute("ServerThrottle", 0)
+					vehicle:SetAttribute("ServerSteer", 0)
+					vehicle:SetAttribute("ServerHandbrake", true)
+				end
+			end
+		end
+	end
+end
+
 function VehicleService.IsPlayerDriving(player: Player, vehicle: Model): boolean
 	return ConvoyService.GetControlledVehicle(player) == vehicle
 		and vehicle:GetAttribute("ControlledByUserId") == player.UserId
 		and ConvoyService.IsOperational(vehicle)
+end
+
+function VehicleService.UpdateServerSurfaceForTest(vehicle: Model)
+	updateServerSurface(vehicle)
 end
 
 return VehicleService

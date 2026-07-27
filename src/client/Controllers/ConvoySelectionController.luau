@@ -7,6 +7,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 local selectRemote = ReplicatedStorage:WaitForChild("HoonangaRemotes")
 	:WaitForChild("SelectConvoyClass") :: RemoteEvent
+local sessionStateRemote = ReplicatedStorage:WaitForChild("HoonangaRemotes")
+	:WaitForChild("SessionStateChanged") :: RemoteEvent
 
 local CHOICES = {
 	HoonangaRoadtrain = { Key = Enum.KeyCode.F1, ClassId = "Roadtrain" },
@@ -17,6 +19,7 @@ local CHOICES = {
 local ConvoySelectionController = {}
 
 function ConvoySelectionController.Start()
+	local currentPhase = "Lobby"
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "HoonangaConvoySelector"
 	gui.IgnoreGuiInset = true
@@ -33,12 +36,17 @@ function ConvoySelectionController.Start()
 	label.TextColor3 = Color3.fromRGB(238, 220, 189)
 	label.TextSize = 14
 	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Text = " F1 ROADTRAIN   F2 TWO UTES   F3 THREE BIKES"
+	label.Text = " LOBBY: F1 ROADTRAIN   F2 TWO UTES   F3 THREE BIKES"
 	label.Parent = gui
+
+	sessionStateRemote.OnClientEvent:Connect(function(newPhase: string)
+		currentPhase = newPhase
+		gui.Enabled = newPhase == "Lobby"
+	end)
 
 	for actionName, choice in CHOICES do
 		ContextActionService:BindActionAtPriority(actionName, function(_, state)
-			if state == Enum.UserInputState.Begin then
+			if state == Enum.UserInputState.Begin and currentPhase == "Lobby" then
 				selectRemote:FireServer(choice.ClassId)
 			end
 			return Enum.ContextActionResult.Sink

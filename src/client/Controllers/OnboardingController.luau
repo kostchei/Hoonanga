@@ -6,11 +6,17 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
+local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
+local remotes = ReplicatedStorage:WaitForChild("HoonangaRemotes")
+local completeTutorialRemote = remotes:WaitForChild("CompleteTutorial") :: RemoteEvent
+local progressionUpdatedRemote = remotes:WaitForChild("ProgressionUpdated") :: RemoteEvent
+local getPlayerData = remotes:WaitForChild("GetPlayerData") :: RemoteFunction
 local activeStepIndex = 1
 local currentStep: TutorialConfig.TutorialStep? = TutorialConfig.Steps[1]
 local isDismissed = false
+local currentPhase = "Lobby"
 
 local OnboardingController = {}
 
@@ -19,7 +25,7 @@ function OnboardingController.Start()
 	gui.Name = "HoonangaOnboarding"
 	gui.IgnoreGuiInset = true
 	gui.ResetOnSpawn = false
-	gui.Enabled = true
+	gui.Enabled = false
 	gui.Parent = localPlayer:WaitForChild("PlayerGui")
 
 	local panel = Instance.new("Frame")
@@ -67,9 +73,13 @@ function OnboardingController.Start()
 	closeButton.Parent = panel
 
 	local function dismissTutorial()
+		if isDismissed then
+			return
+		end
 		isDismissed = true
 		currentStep = nil
 		gui.Enabled = false
+		completeTutorialRemote:FireServer()
 	end
 
 	closeButton.MouseButton1Click:Connect(dismissTutorial)
@@ -84,14 +94,15 @@ function OnboardingController.Start()
 	end)
 
 	local function updateStepUI()
-		if isDismissed then
+		if isDismissed or currentPhase ~= "InRun" then
 			gui.Enabled = false
 			return
 		end
 		if currentStep then
 			title.Text = string.format(
-				"TUTORIAL (%d/5): %s [%s]",
+				"TUTORIAL (%d/%d): %s [%s]",
 				activeStepIndex,
+				#TutorialConfig.Steps,
 				currentStep.Title,
 				currentStep.ActionKeyHint
 			)
@@ -104,42 +115,62 @@ function OnboardingController.Start()
 
 	updateStepUI()
 
+	local sessionStateRemote = remotes:WaitForChild("SessionStateChanged") :: RemoteEvent
+	sessionStateRemote.OnClientEvent:Connect(function(newPhase: string)
+		currentPhase = newPhase
+		updateStepUI()
+	end)
+
 	RunService.RenderStepped:Connect(function()
-		if isDismissed then
+		if isDismissed or currentPhase ~= "InRun" then
 			return
 		end
 
-		local character = localPlayer.Character
-		local seat = if character
-			then character:FindFirstChildOfClass("Humanoid") and (character:FindFirstChildOfClass(
-				"Humanoid"
-			) :: Humanoid).SeatPart
-			else nil
-		local vehicle = if seat then seat:FindFirstAncestorOfClass("Model") else nil
+		local vehicle = VehicleLocator.ForPlayer(localPlayer)
 
 		if vehicle and vehicle.PrimaryPart then
 			local speed = vehicle.PrimaryPart.AssemblyLinearVelocity.Magnitude
-			local dist = math.max(0, -vehicle.PrimaryPart.Position.Z)
+			local replicatedDistance = localPlayer:GetAttribute("RunDistance")
+			local dist = if typeof(replicatedDistance) == "number"
+				then math.max(0, replicatedDistance)
+				else 0
 
 			if activeStepIndex == 1 and speed > 10 then
 				activeStepIndex = 2
 				currentStep = TutorialConfig.Steps[2]
 				updateStepUI()
-			elseif activeStepIndex == 2 and dist > 300 then
+			elseif activeStepIndex == 2 and dist > TutorialConfig.DistanceThresholds.Steering then
 				activeStepIndex = 3
 				currentStep = TutorialConfig.Steps[3]
 				updateStepUI()
-			elseif activeStepIndex == 3 and dist > 800 then
+			elseif activeStepIndex == 3 and dist > TutorialConfig.DistanceThresholds.Combat then
 				activeStepIndex = 4
 				currentStep = TutorialConfig.Steps[4]
 				updateStepUI()
-			elseif activeStepIndex == 4 and dist > 1500 then
+			elseif activeStepIndex == 4 and dist > TutorialConfig.DistanceThresholds.Fuel then
 				activeStepIndex = 5
 				currentStep = TutorialConfig.Steps[5]
 				updateStepUI()
-			elseif activeStepIndex == 5 and dist > 2500 then
+			elseif activeStepIndex == 5 and dist > TutorialConfig.DistanceThresholds.Forks then
 				dismissTutorial()
 			end
+		end
+	end)
+
+	local function acceptProfile(profile: any)
+		if typeof(profile) == "table" and profile.TutorialCompleted == true then
+			isDismissed = true
+			currentStep = nil
+			gui.Enabled = false
+		end
+	end
+	progressionUpdatedRemote.OnClientEvent:Connect(acceptProfile)
+	task.spawn(function()
+		local success, profile = pcall(function()
+			return getPlayerData:InvokeServer()
+		end)
+		if success then
+			acceptProfile(profile)
 		end
 	end)
 end

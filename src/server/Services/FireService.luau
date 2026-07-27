@@ -265,6 +265,10 @@ local function stepVehicle(vehicle: Model, deltaTime: number)
 	if isBurning(state) then
 		speedDecay *= fireConfig.EstablishedSpeedDecayScale
 	end
+	local upgradeCooling = vehicle:GetAttribute("UpgradeHeatCoolMultiplier")
+	if typeof(upgradeCooling) == "number" then
+		decay *= math.clamp(upgradeCooling, 0.5, 2)
+	end
 
 	heat = math.clamp(heat - (decay + speedDecay) * deltaTime, 0, fireConfig.MaxHeat)
 

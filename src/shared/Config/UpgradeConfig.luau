@@ -49,6 +49,30 @@ local UPGRADES: { [string]: UpgradeDef } = {
 		Category = "Speed",
 		SpeedMult = 1.15,
 	},
+	LightweightPanels = {
+		Id = "LightweightPanels",
+		Name = "Lightweight Panels",
+		Description = "+10% speed, -12% maximum hull",
+		Category = "Speed",
+		SpeedMult = 1.1,
+		HullMult = 0.88,
+	},
+	LongRangeTank = {
+		Id = "LongRangeTank",
+		Name = "Long-Range Tank",
+		Description = "+25% fuel capacity, -3% speed",
+		Category = "Survival",
+		FuelCapMult = 1.25,
+		SpeedMult = 0.97,
+	},
+	RallySuspension = {
+		Id = "RallySuspension",
+		Name = "Rally Suspension",
+		Description = "+12% grip and +3% speed",
+		Category = "Handling",
+		GripMult = 1.12,
+		SpeedMult = 1.03,
+	},
 }
 
 return {

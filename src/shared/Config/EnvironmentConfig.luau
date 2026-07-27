@@ -34,7 +34,7 @@ local BIOMES: { [string]: BiomeProfile } = {
 		FogEnd = 800,
 		Material = Enum.Material.Rock,
 	},
-	Mudflats = {
+	Mudflat = {
 		Name = "Mudflats",
 		GroundColor = Color3.fromRGB(56, 38, 25),
 		AccentColor = Color3.fromRGB(35, 24, 15),

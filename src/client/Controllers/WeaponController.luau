@@ -16,6 +16,7 @@ local Workspace = game:GetService("Workspace")
 
 local WeaponConfig = require(ReplicatedStorage.Shared.Config.WeaponConfig)
 local WeaponState = require(ReplicatedStorage.Shared.WeaponState)
+local InputModeController = require(script.Parent.InputModeController)
 local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
@@ -47,6 +48,7 @@ local TRACER_STYLES: { [string]: { Color: Color3, Thickness: number, Lifetime: n
 
 local firing = false
 local lastLocalShot = 0
+local tracerSerial = 0
 
 local function currentVehicle(): Model?
 	return VehicleLocator.ForPlayer(localPlayer)
@@ -57,6 +59,17 @@ local function activeWeapon(vehicle: Model): WeaponConfig.WeaponConfig
 end
 
 local function drawTracer(weaponId: string, origin: Vector3, endPosition: Vector3)
+	tracerSerial += 1
+	if
+		(localPlayer:GetAttribute("LowPerformanceMode") == true and tracerSerial % 2 == 0)
+		or (
+			localPlayer:GetAttribute("ReducedFlashing") == true
+			and (weaponId == "MachineGun" or weaponId == "ForwardGun")
+			and tracerSerial % 3 ~= 0
+		)
+	then
+		return
+	end
 	local distance = (endPosition - origin).Magnitude
 	if distance <= 0.05 then
 		return
@@ -87,6 +100,10 @@ local WeaponController = {}
 function WeaponController.Start()
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed then
+			return
+		end
+		if not InputModeController.IsGameplayEnabled() then
+			firing = false
 			return
 		end
 
@@ -138,7 +155,7 @@ function WeaponController.Start()
 	end)
 
 	RunService.RenderStepped:Connect(function()
-		if not firing then
+		if not firing or not InputModeController.IsGameplayEnabled() then
 			return
 		end
 		local vehicle = currentVehicle()

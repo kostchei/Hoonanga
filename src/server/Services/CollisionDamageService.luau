@@ -4,6 +4,7 @@ local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local AudioService = require(script.Parent.AudioService)
 local CombatService = require(script.Parent.CombatService)
 
 local VEHICLE_IMPACT_THRESHOLD = 18
@@ -114,6 +115,7 @@ local function applyVehicleImpact(first: Model, second: Model)
 	-- convoy vehicles that collide at 60 studs a second have still collided.
 	CombatService.ApplyImpactDamage(first, damageToFirst, second)
 	CombatService.ApplyImpactDamage(second, damageToSecond, first)
+	AudioService.PlayEffectAt("VehicleImpact", (firstChassis.Position + secondChassis.Position) / 2)
 end
 
 local function applyBoundaryImpact(vehicle: Model, boundary: BasePart)
@@ -140,6 +142,9 @@ local function applyBoundaryImpact(vehicle: Model, boundary: BasePart)
 	-- Terrain, not impact: a ram bar helps you win a ramming exchange, it
 	-- does not help you hit a canyon wall.
 	CombatService.ApplyDamage(vehicle, "Terrain", damage, nil)
+	if vehicle.PrimaryPart then
+		AudioService.PlayEffectAt("VehicleImpact", vehicle.PrimaryPart.Position)
+	end
 end
 
 local function bindVehicle(instance: Instance)

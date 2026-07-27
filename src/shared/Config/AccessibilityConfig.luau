@@ -1,9 +1,11 @@
 --!strict
 
+export type ColorblindMode = "None" | "Protanopia" | "Deuteranopia" | "Tritanopia"
+
 export type AccessibilitySettings = {
 	FieldOfView: number,
 	ScreenShakeMultiplier: number,
-	ColorblindMode: "None" | "Protanopia" | "Deuteranopia" | "Tritanopia",
+	ColorblindMode: ColorblindMode,
 	SubtitlesEnabled: boolean,
 	ReducedFlashing: boolean,
 }

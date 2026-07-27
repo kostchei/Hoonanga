@@ -52,18 +52,19 @@ function SessionResultController.Start()
 	listLabel.Parent = panel
 
 	sessionStateRemote.OnClientEvent:Connect(function(state: string, data: any)
-		if state == "Ended" and typeof(data) == "table" then
+		if state == "Results" and typeof(data) == "table" then
 			local lines = {}
-			for place, stats in data do
+			for _, stats in data do
 				table.insert(
 					lines,
 					string.format(
-						"#%d %s - %.2f km | Kills: %d | Scrap +%d | XP +%d",
-						place,
-						stats.Player and stats.Player.Name or "Player",
+						"#%d %s [%s] - %.2f km | Kills: %d | Credits +%d | XP +%d",
+						stats.Placement or 0,
+						stats.Name or "Player",
+						stats.ClassId or "Ute",
 						(stats.Distance or 0) / 1000,
 						stats.Kills or 0,
-						stats.ScrapEarned or 0,
+						stats.CreditsEarned or 0,
 						stats.XpEarned or 0
 					)
 				)

@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local VehiclePhysics = require(ReplicatedStorage.Shared.VehiclePhysics)
+local InputModeController = require(script.Parent.InputModeController)
 local VehicleLocator = require(script.Parent.VehicleLocator)
 
 local localPlayer = Players.LocalPlayer
@@ -53,6 +54,10 @@ local function handleDigitalAction(
 	_inputObject: InputObject
 ): Enum.ContextActionResult
 	if not activeVehicle then
+		return Enum.ContextActionResult.Pass
+	end
+	if not InputModeController.IsGameplayEnabled() then
+		resetInput()
 		return Enum.ContextActionResult.Pass
 	end
 
@@ -177,6 +182,9 @@ function VehicleController.Start()
 			return
 		end
 
+		if not InputModeController.IsGameplayEnabled() then
+			resetInput()
+		end
 		local throttle, steer, handbrake = currentInput()
 		if not vehicle:GetAttribute("Destroyed") and ownsVehiclePhysics(vehicle) then
 			VehiclePhysics.Step(vehicle, {

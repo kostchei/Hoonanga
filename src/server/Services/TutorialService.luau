@@ -1,27 +1,22 @@
 --!strict
 
-local Players = game:GetService("Players")
+local ProgressionService = require(script.Parent.ProgressionService)
+local RemoteService = require(script.Parent.RemoteService)
 
 local TutorialService = {}
 
-local completedTutorial: { [Player]: boolean } = {}
-
 function TutorialService.Start()
-	Players.PlayerAdded:Connect(function(player)
-		completedTutorial[player] = false
-	end)
-
-	Players.PlayerRemoving:Connect(function(player)
-		completedTutorial[player] = nil
+	RemoteService.Get("CompleteTutorial").OnServerEvent:Connect(function(player: Player)
+		ProgressionService.MarkTutorialCompleted(player)
 	end)
 end
 
 function TutorialService.HasCompleted(player: Player): boolean
-	return completedTutorial[player] == true
+	return ProgressionService.GetProfile(player).TutorialCompleted
 end
 
 function TutorialService.MarkCompleted(player: Player)
-	completedTutorial[player] = true
+	ProgressionService.MarkTutorialCompleted(player)
 end
 
 return TutorialService
